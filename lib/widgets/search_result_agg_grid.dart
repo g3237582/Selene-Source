@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/search_result.dart';
 import '../models/aggregated_search_result.dart';
 import '../models/video_info.dart';
+import '../search/search_result_aggregator.dart';
 import '../services/theme_service.dart';
 import '../utils/device_utils.dart';
 import '../utils/font_utils.dart';
@@ -47,43 +48,24 @@ class _SearchResultAggGridState extends State<SearchResultAggGrid>
   @override
   void initState() {
     super.initState();
-    _updateAggregatedResults();
+    _rebuildAggregatedResults();
   }
 
   @override
   void didUpdateWidget(SearchResultAggGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.results != oldWidget.results) {
-      _updateAggregatedResults();
+      setState(_rebuildAggregatedResults);
     }
   }
 
   /// 更新聚合结果
-  void _updateAggregatedResults() {
-    final newAggregatedResults = <String, AggregatedSearchResult>{};
-    final newOrderedKeys = <String>[];
-    
-    for (final result in widget.results) {
-      final key = AggregatedSearchResult.generateKey(
-        result.title, 
-        result.year, 
-        result.episodes.length
-      );
-      
-      if (newAggregatedResults.containsKey(key)) {
-        // 已存在，添加到现有聚合结果中
-        newAggregatedResults[key] = newAggregatedResults[key]!.addResult(result);
-      } else {
-        // 新的聚合结果
-        newAggregatedResults[key] = AggregatedSearchResult.fromSearchResult(result);
-        newOrderedKeys.add(key);
-      }
-    }
-    
-    setState(() {
-      _aggregatedResults = newAggregatedResults;
-      _orderedKeys = newOrderedKeys; // 直接使用新的顺序
-    });
+  void _rebuildAggregatedResults() {
+    final grouped = SearchResultAggregator.group(widget.results);
+    _aggregatedResults = {
+      for (final item in grouped) item.key: item,
+    };
+    _orderedKeys = [for (final item in grouped) item.key];
   }
 
   @override

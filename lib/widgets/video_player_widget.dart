@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:pip/pip.dart';
+import '../playback/player_stream_cache.dart';
 import 'mobile_player_controls.dart';
 import 'pc_player_controls.dart';
 import 'video_player_surface.dart';
@@ -168,7 +169,13 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     if (_playerDisposed) {
       return;
     }
-    _player = Player();
+    _player = PlayerStreamCache.create(live: widget.live);
+    await PlayerStreamCache.apply(_player!, live: widget.live);
+    if (_playerDisposed || !mounted) {
+      await _player?.dispose();
+      _player = null;
+      return;
+    }
     _videoController = VideoController(_player!);
     _setupPlayerListeners();
     if (_currentUrl != null) {

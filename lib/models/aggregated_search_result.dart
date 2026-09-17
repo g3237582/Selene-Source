@@ -76,9 +76,9 @@ class AggregatedSearchResult {
     return AggregatedSearchResult(
       key: key,
       title: title,
-      year: year,
+      year: year.isNotEmpty ? year : result.year,
       type: type,
-      cover: cover,
+      cover: cover.isNotEmpty ? cover : result.poster,
       episodeCounts: newEpisodeCounts,
       doubanIds: newDoubanIds,
       sourceNames: newSourceNames,

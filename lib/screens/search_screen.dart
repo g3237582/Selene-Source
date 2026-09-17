@@ -8,9 +8,12 @@ import '../services/theme_service.dart';
 import '../services/sse_search_service.dart';
 import '../models/search_result.dart';
 import '../models/video_info.dart';
+import '../search/search_list_paging.dart';
+import '../search/search_result_aggregator.dart';
 import '../widgets/video_menu_bottom_sheet.dart';
 import '../widgets/custom_switch.dart';
 import '../widgets/favorites_grid.dart';
+import '../widgets/search_pagination_bar.dart';
 import '../widgets/search_result_agg_grid.dart';
 import '../widgets/search_results_grid.dart';
 import '../widgets/filter_options_selector.dart';
@@ -51,6 +54,7 @@ class _SearchScreenState extends State<SearchScreen>
   String _selectedYear = 'all';
   String _selectedTitle = 'all';
   SortOrder _yearSortOrder = SortOrder.none;
+  int _currentPage = 1;
 
   // 长按删除相关状态
   String? _deletingHistoryItem;
@@ -116,6 +120,44 @@ class _SearchScreenState extends State<SearchScreen>
     }
 
     return results;
+  }
+
+  int get _resultCardCount {
+    if (_useAggregatedView) {
+      return SearchResultAggregator.group(_filteredSearchResults).length;
+    }
+    return _filteredSearchResults.length;
+  }
+
+  int get _resultPageCount =>
+      SearchListPaging.pageCount(totalItems: _resultCardCount);
+
+  int get _safePage =>
+      SearchListPaging.clampPage(_currentPage, _resultPageCount);
+
+  List<SearchResult> get _pagedSearchResults {
+    if (_useAggregatedView) {
+      final grouped = SearchResultAggregator.group(_filteredSearchResults);
+      final pageGroups = SearchListPaging.pageOf(grouped, _safePage);
+      return [
+        for (final group in pageGroups) ...group.originalResults,
+      ];
+    }
+    return SearchListPaging.pageOf(_filteredSearchResults, _safePage);
+  }
+
+  void _goToPage(int page) {
+    final next = SearchListPaging.clampPage(page, _resultPageCount);
+    if (next == _currentPage) {
+      return;
+    }
+    setState(() {
+      _currentPage = next;
+    });
+  }
+
+  void _resetToFirstPage() {
+    _currentPage = 1;
   }
 
   @override
@@ -496,6 +538,7 @@ class _SearchScreenState extends State<SearchScreen>
       _selectedYear = 'all';
       _selectedTitle = 'all';
       _yearSortOrder = SortOrder.none;
+      _resetToFirstPage();
     });
 
     // 添加到搜索历史
@@ -592,6 +635,7 @@ class _SearchScreenState extends State<SearchScreen>
               _searchResults.clear();
               _searchError = null;
               _searchProgress = null;
+              _resetToFirstPage();
               _searchService.stopSearch();
             });
           },
@@ -1013,17 +1057,16 @@ class _SearchScreenState extends State<SearchScreen>
                   ),
                   if (_hasSearched) ...[
                     const SizedBox(width: 8),
-                    if (_hasReceivedStart)
-                      Text(
-                        _getProgressText(),
-                        style: FontUtils.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w400,
-                          color: themeService.isDarkMode
-                              ? const Color(0xFFb0b0b0)
-                              : const Color(0xFF7f8c8d),
-                        ),
-                      )
+                    Text(
+                      _getResultsSummaryText(),
+                      style: FontUtils.poppins(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w400,
+                        color: themeService.isDarkMode
+                            ? const Color(0xFFb0b0b0)
+                            : const Color(0xFF7f8c8d),
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -1055,6 +1098,7 @@ class _SearchScreenState extends State<SearchScreen>
                           onChanged: (value) {
                             setState(() {
                               _useAggregatedView = value;
+                              _resetToFirstPage();
                             });
                           },
                           activeColor: const Color(0xFF27ae60),
@@ -1096,8 +1140,8 @@ class _SearchScreenState extends State<SearchScreen>
                 Expanded(
                   child: _useAggregatedView
                       ? SearchResultAggGrid(
-                          key: const ValueKey('agg_grid'),
-                          results: _filteredSearchResults,
+                          key: ValueKey('agg_grid_$_safePage'),
+                          results: _pagedSearchResults,
                           themeService: themeService,
                           onVideoTap: _onVideoTap,
                           onGlobalMenuAction: _onGlobalMenuAction,
@@ -1119,14 +1163,21 @@ class _SearchScreenState extends State<SearchScreen>
                           hasReceivedStart: _hasReceivedStart,
                         )
                       : SearchResultsGrid(
-                          key: const ValueKey('list_grid'),
-                          results: _filteredSearchResults,
+                          key: ValueKey('list_grid_$_safePage'),
+                          results: _pagedSearchResults,
                           themeService: themeService,
                           onVideoTap: _onVideoTap,
                           onGlobalMenuAction: _onGlobalMenuAction,
                           hasReceivedStart: _hasReceivedStart,
                         ),
                 ),
+                if (_resultCardCount > 0)
+                  SearchPaginationBar(
+                    totalItems: _resultCardCount,
+                    page: _safePage,
+                    pageCount: _resultPageCount,
+                    onPageChanged: _goToPage,
+                  ),
               ],
             ),
           ),
@@ -1138,11 +1189,20 @@ class _SearchScreenState extends State<SearchScreen>
     _onGlobalMenuAction(videoInfo, VideoMenuAction.play);
   }
 
-  String _getProgressText() {
-    if (_searchProgress != null) {
-      return '${_searchProgress!.completedSources}/${_searchProgress!.totalSources}';
+  String _getResultsSummaryText() {
+    final summary = SearchListPaging.summaryText(
+      totalItems: _resultCardCount,
+      page: _resultCardCount == 0 ? 1 : _safePage,
+      pageCount: _resultPageCount,
+    );
+    if (!_hasReceivedStart) {
+      return summary;
     }
-    return '0/0';
+    if (_searchProgress != null &&
+        _searchProgress!.completedSources < _searchProgress!.totalSources) {
+      return '$summary  ${_searchProgress!.completedSources}/${_searchProgress!.totalSources}源';
+    }
+    return summary;
   }
 
   Widget _buildEmptyStateContent() {
@@ -1465,16 +1525,19 @@ class _SearchScreenState extends State<SearchScreen>
           _buildFilterPill('来源', _sourceOptions, _selectedSource, (newValue) {
             setState(() {
               _selectedSource = newValue;
+              _resetToFirstPage();
             });
           }, isFirst: true),
           _buildFilterPill('标题', _titleOptions, _selectedTitle, (newValue) {
             setState(() {
               _selectedTitle = newValue;
+              _resetToFirstPage();
             });
           }),
           _buildFilterPill('年份', _yearOptions, _selectedYear, (newValue) {
             setState(() {
               _selectedYear = newValue;
+              _resetToFirstPage();
             });
           }),
           _buildYearSortButton(),
