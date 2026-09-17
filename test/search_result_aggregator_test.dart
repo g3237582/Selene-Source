@@ -58,6 +58,44 @@ void main() {
       expect(grouped, hasLength(2));
     });
 
+    test('merges season titles even when sources disagree on year', () {
+      final grouped = SearchResultAggregator.group([
+        _result(id: '1', title: '良医 第四季', year: '2017', source: '源A'),
+        _result(id: '2', title: '良医第四季', year: '2025', source: '源B'),
+        _result(id: '3', title: '良医第4季', year: '2020', source: '源C'),
+      ]);
+      expect(grouped, hasLength(1));
+      expect(grouped.single.originalResults, hasLength(3));
+    });
+
+    test('does not merge a series with a specific season', () {
+      final grouped = SearchResultAggregator.group([
+        _result(id: '1', title: '良医', year: '2017', source: '源A'),
+        _result(id: '2', title: '良医第四季', year: '2017', source: '源B'),
+      ]);
+      expect(grouped, hasLength(2));
+    });
+
+    test('merges commentary retitles that share a poster path', () {
+      final grouped = SearchResultAggregator.group([
+        _result(
+          id: '1',
+          title: '奇迹[电影解说]',
+          year: '2004',
+          source: '源A',
+          poster: 'https://a.example.com/upload/vod/5f3a9c2e1b88aa/1.jpg',
+        ),
+        _result(
+          id: '2',
+          title: '天赐良医【影视解说】',
+          year: '2004',
+          source: '源B',
+          poster: 'https://b.example.com/upload/vod/5f3a9c2e1b88aa/1.jpg?w=300',
+        ),
+      ]);
+      expect(grouped, hasLength(1));
+    });
+
     test('merges movie and series cuts of the same title', () {
       final grouped = SearchResultAggregator.group([
         _result(id: '1', title: '同一部', episodes: 1, source: '源A'),

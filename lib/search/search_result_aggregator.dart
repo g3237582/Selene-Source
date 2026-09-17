@@ -4,7 +4,7 @@ import '../models/search_result.dart';
 /// Groups source search hits into unique work cards.
 ///
 /// Two hits belong together when they share a normalized title (and year),
-/// a distinctive poster file/URL, or the same Douban id.
+/// a season-qualified title, a distinctive poster file/URL, or the same Douban id.
 class SearchResultAggregator {
   static const _genericPosterNames = {
     'cover',
@@ -23,6 +23,24 @@ class SearchResultAggregator {
     'none',
     'null',
     'avatar',
+    'upload',
+    'static',
+    'images',
+    'pics',
+  };
+
+  static const _chineseDigits = {
+    '零': 0,
+    '一': 1,
+    '二': 2,
+    '两': 2,
+    '三': 3,
+    '四': 4,
+    '五': 5,
+    '六': 6,
+    '七': 7,
+    '八': 8,
+    '九': 9,
   };
 
   static final _bracketTag = RegExp(r'【[^】]*】|\[[^\]]*\]');
@@ -35,6 +53,11 @@ class SearchResultAggregator {
     r'''[\s`~!@#$%^&*()_\-+=\[\]{}\\|;:'",.<>/?·—–【】（）、，。：；！？「」『』《》]+''',
   );
   static final _digitRun = RegExp(r'\d{6,}');
+  static final _hexRun = RegExp(r'^[a-f0-9]{10,}$');
+  static final _chineseSeason = RegExp(r'第([零一二两三四五六七八九十百]+)([季部])');
+  static final _seasonToken = RegExp(r'第\d+[季部]|s\d+|season\d+');
+  static final _dateLike = RegExp(r'^(19|20)\d{4,6}$');
+  static final _mixedAlnum = RegExp(r'(?=.*[a-z])(?=.*\d)');
 
   static List<AggregatedSearchResult> group(List<SearchResult> results) {
     if (results.isEmpty) {
@@ -95,8 +118,14 @@ class SearchResultAggregator {
       }
     }
 
-    for (final indices in byTitle.values) {
-      _unionByYear(results, indices, union);
+    for (final entry in byTitle.entries) {
+      if (hasSeasonToken(entry.key)) {
+        for (var offset = 1; offset < entry.value.length; offset++) {
+          union(entry.value.first, entry.value[offset]);
+        }
+      } else {
+        _unionByYear(results, entry.value, union);
+      }
     }
 
     final buckets = <int, List<SearchResult>>{};
@@ -152,8 +181,49 @@ class SearchResultAggregator {
     title = title.replaceAll(_bracketTag, '');
     title = title.replaceAll(_trailingYear, '');
     title = title.replaceAll(_qualityTag, '');
+    title = title.replaceAllMapped(_chineseSeason, (match) {
+      final number = parseChineseNumber(match.group(1)!);
+      if (number == null) {
+        return match.group(0)!;
+      }
+      return '第$number${match.group(2)}';
+    });
     title = title.replaceAll(_punctuation, '');
     return title;
+  }
+
+  static bool hasSeasonToken(String titleKey) {
+    return _seasonToken.hasMatch(titleKey);
+  }
+
+  static int? parseChineseNumber(String raw) {
+    if (raw == '十') {
+      return 10;
+    }
+    final single = _chineseDigits[raw];
+    if (single != null) {
+      return single;
+    }
+    if (raw.startsWith('十')) {
+      final ones = _chineseDigits[raw.substring(1)];
+      return ones == null ? null : 10 + ones;
+    }
+    if (raw.endsWith('十')) {
+      final tens = _chineseDigits[raw.substring(0, raw.length - 1)];
+      return tens == null ? null : tens * 10;
+    }
+    final tenIndex = raw.indexOf('十');
+    if (tenIndex <= 0) {
+      return null;
+    }
+    final tens = _chineseDigits[raw.substring(0, tenIndex)];
+    final ones = tenIndex + 1 < raw.length
+        ? _chineseDigits[raw.substring(tenIndex + 1)]
+        : 0;
+    if (tens == null || ones == null) {
+      return null;
+    }
+    return tens * 10 + ones;
   }
 
   static String normalizeYear(String raw) {
@@ -166,28 +236,44 @@ class SearchResultAggregator {
     if (trimmed.isEmpty) {
       return const [];
     }
-    final uri = Uri.tryParse(trimmed);
+    final unwrapped = _unwrapProxyUrl(trimmed);
+    final uri = Uri.tryParse(unwrapped);
     if (uri == null) {
       return const [];
     }
-    final path = uri.path.toLowerCase();
+    var path = uri.path.toLowerCase();
+    if (path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
     if (path.isEmpty) {
       return const [];
     }
     final file = path.split('/').last;
     final dot = file.lastIndexOf('.');
     final name = dot <= 0 ? file : file.substring(0, dot);
-    if (_genericPosterNames.contains(name)) {
-      return const [];
-    }
-    final keys = <String>[];
+    final keys = <String>{};
     if (uri.host.isNotEmpty) {
       keys.add('url:${uri.host.toLowerCase()}$path');
     }
-    if (_isDistinctivePosterName(name)) {
+    if (!_genericPosterNames.contains(name) && _isDistinctivePosterName(name)) {
       keys.add('file:$file');
     }
-    return keys;
+    if (_hasDistinctivePathSegment(path)) {
+      keys.add('path:$path');
+    }
+    return keys.toList(growable: false);
+  }
+
+  static String _unwrapProxyUrl(String raw) {
+    final uri = Uri.tryParse(raw);
+    if (uri == null) {
+      return raw;
+    }
+    final nested = uri.queryParameters['url'];
+    if (nested != null && nested.isNotEmpty) {
+      return nested;
+    }
+    return raw;
   }
 
   static bool _isDistinctivePosterName(String name) {
@@ -195,5 +281,26 @@ class SearchResultAggregator {
       return true;
     }
     return _digitRun.hasMatch(name);
+  }
+
+  static bool _hasDistinctivePathSegment(String path) {
+    for (final segment in path.split('/')) {
+      if (segment.isEmpty || _genericPosterNames.contains(segment)) {
+        continue;
+      }
+      if (_dateLike.hasMatch(segment)) {
+        continue;
+      }
+      if (_hexRun.hasMatch(segment)) {
+        return true;
+      }
+      if (segment.length >= 10 && _mixedAlnum.hasMatch(segment)) {
+        return true;
+      }
+      if (_digitRun.hasMatch(segment)) {
+        return true;
+      }
+    }
+    return false;
   }
 }
