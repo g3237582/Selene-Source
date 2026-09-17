@@ -159,5 +159,41 @@ void main() {
       ]);
       expect(grouped, hasLength(1));
     });
+
+    test('merges different titles that share a poster dHash', () {
+      final grouped = SearchResultAggregator.group(
+        [
+          _result(
+            id: '1',
+            title: '奇迹[电影解说]',
+            poster: 'https://a.example.com/a.jpg',
+          ),
+          _result(
+            id: '2',
+            title: '天赐良医【影视解说】',
+            poster: 'https://b.example.com/b.jpg',
+          ),
+        ],
+        posterHashes: {
+          'https://a.example.com/a.jpg': '0123456789abcdef',
+          'https://b.example.com/b.jpg': '0123456789abcdef',
+        },
+      );
+      expect(grouped, hasLength(1));
+    });
+
+    test('merges posters whose dHash only differs by a few bits', () {
+      final grouped = SearchResultAggregator.group(
+        [
+          _result(id: '1', title: '影片甲', poster: 'https://a.example.com/a.jpg'),
+          _result(id: '2', title: '影片乙', poster: 'https://b.example.com/b.jpg'),
+        ],
+        posterHashes: {
+          'https://a.example.com/a.jpg': '0000000000000000',
+          'https://b.example.com/b.jpg': '0000000000000001',
+        },
+      );
+      expect(grouped, hasLength(1));
+    });
   });
 }

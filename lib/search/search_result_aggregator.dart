@@ -1,5 +1,6 @@
 import '../models/aggregated_search_result.dart';
 import '../models/search_result.dart';
+import 'poster_dhash.dart';
 
 /// Groups source search hits into unique work cards.
 ///
@@ -59,7 +60,10 @@ class SearchResultAggregator {
   static final _dateLike = RegExp(r'^(19|20)\d{4,6}$');
   static final _mixedAlnum = RegExp(r'(?=.*[a-z])(?=.*\d)');
 
-  static List<AggregatedSearchResult> group(List<SearchResult> results) {
+  static List<AggregatedSearchResult> group(
+    List<SearchResult> results, {
+    Map<String, String> posterHashes = const {},
+  }) {
     if (results.isEmpty) {
       return const [];
     }
@@ -118,6 +122,8 @@ class SearchResultAggregator {
       }
     }
 
+    _unionByPosterHashes(results, posterHashes, union);
+
     for (final entry in byTitle.entries) {
       if (hasSeasonToken(entry.key)) {
         for (var offset = 1; offset < entry.value.length; offset++) {
@@ -165,6 +171,37 @@ class SearchResultAggregator {
     final unknown = byYear[''];
     if (knownYears.length == 1 && unknown != null) {
       union(byYear[knownYears.first]!.first, unknown.first);
+    }
+  }
+
+  static void _unionByPosterHashes(
+    List<SearchResult> results,
+    Map<String, String> posterHashes,
+    void Function(int left, int right) union,
+  ) {
+    if (posterHashes.isEmpty) {
+      return;
+    }
+    final byHash = <String, List<int>>{};
+    for (var index = 0; index < results.length; index++) {
+      final hash = posterHashes[results[index].poster.trim()];
+      if (hash == null || hash.isEmpty) {
+        continue;
+      }
+      byHash.putIfAbsent(hash, () => <int>[]).add(index);
+    }
+    for (final indices in byHash.values) {
+      for (var offset = 1; offset < indices.length; offset++) {
+        union(indices.first, indices[offset]);
+      }
+    }
+    final unique = byHash.keys.toList(growable: false);
+    for (var left = 0; left < unique.length; left++) {
+      for (var right = left + 1; right < unique.length; right++) {
+        if (PosterDHash.isMatch(unique[left], unique[right])) {
+          union(byHash[unique[left]]!.first, byHash[unique[right]]!.first);
+        }
+      }
     }
   }
 

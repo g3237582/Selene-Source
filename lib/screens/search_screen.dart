@@ -10,6 +10,7 @@ import '../models/search_result.dart';
 import '../models/video_info.dart';
 import '../search/search_list_paging.dart';
 import '../search/search_result_aggregator.dart';
+import '../search/poster_hash_loader.dart';
 import '../widgets/video_menu_bottom_sheet.dart';
 import '../widgets/custom_switch.dart';
 import '../widgets/favorites_grid.dart';
@@ -55,6 +56,10 @@ class _SearchScreenState extends State<SearchScreen>
   String _selectedTitle = 'all';
   SortOrder _yearSortOrder = SortOrder.none;
   int _currentPage = 1;
+  Timer? _posterHashTimer;
+
+  Map<String, String> get _posterHashes =>
+      Map<String, String>.from(PosterHashLoader.cache);
 
   // 长按删除相关状态
   String? _deletingHistoryItem;
@@ -124,7 +129,10 @@ class _SearchScreenState extends State<SearchScreen>
 
   int get _resultCardCount {
     if (_useAggregatedView) {
-      return SearchResultAggregator.group(_filteredSearchResults).length;
+      return SearchResultAggregator.group(
+        _filteredSearchResults,
+        posterHashes: _posterHashes,
+      ).length;
     }
     return _filteredSearchResults.length;
   }
@@ -137,7 +145,10 @@ class _SearchScreenState extends State<SearchScreen>
 
   List<SearchResult> get _pagedSearchResults {
     if (_useAggregatedView) {
-      final grouped = SearchResultAggregator.group(_filteredSearchResults);
+      final grouped = SearchResultAggregator.group(
+        _filteredSearchResults,
+        posterHashes: _posterHashes,
+      );
       final pageGroups = SearchListPaging.pageOf(grouped, _safePage);
       return [
         for (final group in pageGroups) ...group.originalResults,
@@ -158,6 +169,20 @@ class _SearchScreenState extends State<SearchScreen>
 
   void _resetToFirstPage() {
     _currentPage = 1;
+  }
+
+  void _schedulePosterHashing() {
+    _posterHashTimer?.cancel();
+    _posterHashTimer = Timer(const Duration(milliseconds: 200), () {
+      PosterHashLoader.ensure(
+        _searchResults.map((item) => item.poster),
+        onUpdate: () {
+          if (mounted) {
+            setState(() {});
+          }
+        },
+      );
+    });
   }
 
   @override
@@ -198,6 +223,7 @@ class _SearchScreenState extends State<SearchScreen>
     _progressSubscription?.cancel();
     _errorSubscription?.cancel();
     _updateTimer?.cancel();
+    _posterHashTimer?.cancel();
     _searchService.dispose();
     _deleteAnimationController?.dispose();
     super.dispose();
@@ -227,6 +253,7 @@ class _SearchScreenState extends State<SearchScreen>
                 setState(() {
                   // 触发UI更新
                 });
+                _schedulePosterHashing();
               }
             });
           }
@@ -1142,6 +1169,7 @@ class _SearchScreenState extends State<SearchScreen>
                       ? SearchResultAggGrid(
                           key: ValueKey('agg_grid_$_safePage'),
                           results: _pagedSearchResults,
+                          posterHashes: _posterHashes,
                           themeService: themeService,
                           onVideoTap: _onVideoTap,
                           onGlobalMenuAction: _onGlobalMenuAction,

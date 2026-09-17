@@ -18,6 +18,7 @@ class SearchResultAggGrid extends StatefulWidget {
   final Function(VideoInfo, VideoMenuAction)? onGlobalMenuAction;
   final Function(SearchResult)? onSourceSelected;
   final bool hasReceivedStart;
+  final Map<String, String> posterHashes;
 
   const SearchResultAggGrid({
     super.key,
@@ -27,6 +28,7 @@ class SearchResultAggGrid extends StatefulWidget {
     this.onGlobalMenuAction,
     this.onSourceSelected,
     required this.hasReceivedStart,
+    this.posterHashes = const {},
   });
 
   @override
@@ -54,14 +56,18 @@ class _SearchResultAggGridState extends State<SearchResultAggGrid>
   @override
   void didUpdateWidget(SearchResultAggGrid oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.results != oldWidget.results) {
+    if (widget.results != oldWidget.results ||
+        widget.posterHashes != oldWidget.posterHashes) {
       setState(_rebuildAggregatedResults);
     }
   }
 
   /// 更新聚合结果
   void _rebuildAggregatedResults() {
-    final grouped = SearchResultAggregator.group(widget.results);
+    final grouped = SearchResultAggregator.group(
+      widget.results,
+      posterHashes: widget.posterHashes,
+    );
     _aggregatedResults = {
       for (final item in grouped) item.key: item,
     };
