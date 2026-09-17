@@ -26,7 +26,8 @@ SearchResult _result({
 
 void main() {
   group('SearchResultAggregator.group', () {
-    test('merges titles that only differ by space, brackets, or quality tags', () {
+    test('merges titles that only differ by space, brackets, or quality tags',
+        () {
       final grouped = SearchResultAggregator.group([
         _result(id: '1', title: '流浪地球', source: '源A'),
         _result(id: '2', title: ' 流浪地球 ', source: '源B'),
@@ -76,6 +77,57 @@ void main() {
       expect(grouped, hasLength(2));
     });
 
+    test('merges a trailing season number with the spelled-out season', () {
+      final grouped = SearchResultAggregator.group([
+        _result(id: '1', title: '某剧4', source: '源A'),
+        _result(id: '2', title: '某剧第四季', source: '源B'),
+        _result(id: '3', title: '某剧 第4季', source: '源C'),
+      ]);
+      expect(grouped, hasLength(1));
+    });
+
+    test(
+        'keeps a numbered season out of the unqualified series even with the same poster hash',
+        () {
+      const poster = 'https://cdn.example.com/upload/vod/p2884280704.jpg';
+      final grouped = SearchResultAggregator.group(
+        [
+          _result(id: '1', title: '某剧', poster: poster, source: '源A'),
+          _result(id: '2', title: '某剧4', poster: poster, source: '源B'),
+        ],
+        posterHashes: {
+          poster: '0123456789abcdef',
+        },
+      );
+      expect(grouped, hasLength(2));
+    });
+
+    test('does not merge different seasons that only share a poster file', () {
+      const poster =
+          'https://cdn.example.com/upload/vod/p2884280704.jpg?imageView=1';
+      final grouped = SearchResultAggregator.group([
+        _result(id: '1', title: '某剧第一季', poster: poster),
+        _result(id: '2', title: '某剧第四季', poster: poster),
+      ]);
+      expect(grouped, hasLength(2));
+    });
+
+    test('does not merge different seasons that only share a poster hash', () {
+      const posterA = 'https://a.example.com/a.jpg';
+      const posterB = 'https://b.example.com/b.jpg';
+      final grouped = SearchResultAggregator.group(
+        [
+          _result(id: '1', title: '某剧第一季', poster: posterA),
+          _result(id: '2', title: '某剧第四季', poster: posterB),
+        ],
+        posterHashes: {
+          posterA: '0123456789abcdef',
+          posterB: '0123456789abcdef',
+        },
+      );
+      expect(grouped, hasLength(2));
+    });
+
     test('merges commentary retitles that share a poster path', () {
       final grouped = SearchResultAggregator.group([
         _result(
@@ -118,15 +170,16 @@ void main() {
           id: '2',
           title: '流浪地球',
           source: '源B',
-          poster:
-              'https://img.other.com/static/p2884280704.jpg',
+          poster: 'https://img.other.com/static/p2884280704.jpg',
         ),
       ]);
       expect(grouped, hasLength(1));
       expect(grouped.single.originalResults, hasLength(2));
     });
 
-    test('does not merge different titles that only share a generic poster name', () {
+    test(
+        'does not merge different titles that only share a generic poster name',
+        () {
       final grouped = SearchResultAggregator.group([
         _result(
           id: '1',

@@ -2,10 +2,24 @@ import '../models/aggregated_search_result.dart';
 import '../models/search_result.dart';
 import 'poster_dhash.dart';
 
+/// Parsed work identity: a base title plus an optional season/part number.
+class TitleParts {
+  const TitleParts({required this.base, this.part});
+
+  final String base;
+  final int? part;
+
+  String get canonical => part == null ? base : '$base#$part';
+
+  bool get hasPart => part != null;
+}
+
 /// Groups source search hits into unique work cards.
 ///
 /// Two hits belong together when they share a normalized title (and year),
 /// a season-qualified title, a distinctive poster file/URL, or the same Douban id.
+/// Poster/hash unions are skipped when season/part numbers conflict, so a
+/// numbered season is never swallowed by the series or another season.
 class SearchResultAggregator {
   static const _genericPosterNames = {
     'cover',
@@ -57,6 +71,10 @@ class SearchResultAggregator {
   static final _hexRun = RegExp(r'^[a-f0-9]{10,}$');
   static final _chineseSeason = RegExp(r'第([零一二两三四五六七八九十百]+)([季部])');
   static final _seasonToken = RegExp(r'第\d+[季部]|s\d+|season\d+');
+  static final _explicitSeason = RegExp(r'^(.*)第(\d+)[季部]$');
+  static final _seasonWord = RegExp(r'^(.*)season(\d{1,2})$');
+  static final _seasonS = RegExp(r'^(.*)s(\d{1,2})$');
+  static final _trailingPart = RegExp(r'^(.*[^\d])(\d{1,2})$');
   static final _dateLike = RegExp(r'^(19|20)\d{4,6}$');
   static final _mixedAlnum = RegExp(r'(?=.*[a-z])(?=.*\d)');
 
@@ -92,23 +110,23 @@ class SearchResultAggregator {
       }
     }
 
+    final parts = [
+      for (final result in results)
+        parseTitleParts(normalizeTitle(result.title)),
+    ];
+
     final byTitle = <String, List<int>>{};
-    final byPoster = <String, int>{};
+    final byPoster = <String, List<int>>{};
     final byDouban = <String, int>{};
 
     for (var index = 0; index < results.length; index++) {
       final result = results[index];
-      final titleKey = normalizeTitle(result.title);
+      final titleKey = parts[index].canonical;
       if (titleKey.isNotEmpty) {
         byTitle.putIfAbsent(titleKey, () => <int>[]).add(index);
       }
       for (final posterKey in posterKeys(result.poster)) {
-        final existing = byPoster[posterKey];
-        if (existing != null) {
-          union(existing, index);
-        } else {
-          byPoster[posterKey] = index;
-        }
+        byPoster.putIfAbsent(posterKey, () => <int>[]).add(index);
       }
       final doubanId = result.doubanId;
       if (doubanId != null && doubanId > 0) {
@@ -122,10 +140,13 @@ class SearchResultAggregator {
       }
     }
 
-    _unionByPosterHashes(results, posterHashes, union);
+    for (final indices in byPoster.values) {
+      _unionCompatible(indices, parts, union);
+    }
+    _unionByPosterHashes(results, posterHashes, parts, union);
 
     for (final entry in byTitle.entries) {
-      if (hasSeasonToken(entry.key)) {
+      if (parts[entry.value.first].hasPart) {
         for (var offset = 1; offset < entry.value.length; offset++) {
           union(entry.value.first, entry.value[offset]);
         }
@@ -177,6 +198,7 @@ class SearchResultAggregator {
   static void _unionByPosterHashes(
     List<SearchResult> results,
     Map<String, String> posterHashes,
+    List<TitleParts> parts,
     void Function(int left, int right) union,
   ) {
     if (posterHashes.isEmpty) {
@@ -191,18 +213,94 @@ class SearchResultAggregator {
       byHash.putIfAbsent(hash, () => <int>[]).add(index);
     }
     for (final indices in byHash.values) {
-      for (var offset = 1; offset < indices.length; offset++) {
-        union(indices.first, indices[offset]);
-      }
+      _unionCompatible(indices, parts, union);
     }
     final unique = byHash.keys.toList(growable: false);
     for (var left = 0; left < unique.length; left++) {
       for (var right = left + 1; right < unique.length; right++) {
-        if (PosterDHash.isMatch(unique[left], unique[right])) {
-          union(byHash[unique[left]]!.first, byHash[unique[right]]!.first);
+        if (!PosterDHash.isMatch(unique[left], unique[right])) {
+          continue;
+        }
+        _unionCompatibleAcross(
+          byHash[unique[left]]!,
+          byHash[unique[right]]!,
+          parts,
+          union,
+        );
+      }
+    }
+  }
+
+  static void _unionCompatible(
+    List<int> indices,
+    List<TitleParts> parts,
+    void Function(int left, int right) union,
+  ) {
+    for (var i = 0; i < indices.length; i++) {
+      for (var j = i + 1; j < indices.length; j++) {
+        if (!titlePartsConflict(parts[indices[i]], parts[indices[j]])) {
+          union(indices[i], indices[j]);
         }
       }
     }
+  }
+
+  static void _unionCompatibleAcross(
+    List<int> left,
+    List<int> right,
+    List<TitleParts> parts,
+    void Function(int left, int right) union,
+  ) {
+    for (final i in left) {
+      for (final j in right) {
+        if (!titlePartsConflict(parts[i], parts[j])) {
+          union(i, j);
+        }
+      }
+    }
+  }
+
+  static bool titlePartsConflict(TitleParts left, TitleParts right) {
+    if (left.part == null && right.part == null) {
+      return false;
+    }
+    if (left.part == null || right.part == null) {
+      return true;
+    }
+    return left.part != right.part;
+  }
+
+  static TitleParts parseTitleParts(String titleKey) {
+    var match = _explicitSeason.firstMatch(titleKey);
+    if (match != null && match.group(1)!.isNotEmpty) {
+      return TitleParts(
+        base: match.group(1)!,
+        part: int.parse(match.group(2)!),
+      );
+    }
+    match = _seasonWord.firstMatch(titleKey);
+    if (match != null && match.group(1)!.isNotEmpty) {
+      final number = int.parse(match.group(2)!);
+      if (number >= 1 && number <= 99) {
+        return TitleParts(base: match.group(1)!, part: number);
+      }
+    }
+    match = _seasonS.firstMatch(titleKey);
+    if (match != null && match.group(1)!.isNotEmpty) {
+      final number = int.parse(match.group(2)!);
+      if (number >= 1 && number <= 99) {
+        return TitleParts(base: match.group(1)!, part: number);
+      }
+    }
+    match = _trailingPart.firstMatch(titleKey);
+    if (match != null) {
+      final base = match.group(1)!;
+      final number = int.parse(match.group(2)!);
+      if (base.length >= 2 && number >= 1 && number <= 99) {
+        return TitleParts(base: base, part: number);
+      }
+    }
+    return TitleParts(base: titleKey);
   }
 
   static AggregatedSearchResult _toAggregated(List<SearchResult> items) {
@@ -230,7 +328,7 @@ class SearchResultAggregator {
   }
 
   static bool hasSeasonToken(String titleKey) {
-    return _seasonToken.hasMatch(titleKey);
+    return parseTitleParts(titleKey).hasPart || _seasonToken.hasMatch(titleKey);
   }
 
   static int? parseChineseNumber(String raw) {
