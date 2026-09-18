@@ -1,0 +1,70 @@
+name: Release Android APKs
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.4'
+          cache: true
+
+      - name: Accept Android licenses
+        run: yes | flutter doctor --android-licenses || true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Test
+        run: flutter test
+
+      - name: Build split APKs
+        run: |
+          flutter build apk --release \
+            --target-platform android-arm64,android-arm \
+            --split-per-abi
+
+      - name: Package artifacts
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "dist/selene-${VERSION}-armv7a.apk"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "dist/selene-${VERSION}-armv8.apk"
+          ls -lh dist
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Selene ${{ github.ref_name }}
+          files: dist/*.apk
+          body: |
+            原生接入 LunaTV 漫画 / 电子书 / 音乐。
+
+            - 登录后按站点开关横滑显示「漫画 / 电子书 / 音乐」
+            - 影视底栏顺序不变：首页、电影、剧集、动漫、综艺、直播
+            - 漫画：搜索、详情、带登录 Cookie 的图片阅读、书架
+            - 电子书：搜索 / 目录、章节正文阅读
+            - 音乐：搜源播放（默认网易云），迷你条 + 全屏页
+
+            **安装说明**
+            - 手机优先下载 `selene-*-armv8.apk`
+            - 本包为 CI 调试签名。若已安装官方 Selene，需要先卸载再装，否则会提示签名不一致。
