@@ -1,0 +1,352 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../models/manga.dart';
+import '../services/manga_service.dart';
+import '../services/theme_service.dart';
+import '../utils/font_utils.dart';
+import '../widgets/authenticated_image.dart';
+import 'manga_detail_screen.dart';
+
+class MangaScreen extends StatefulWidget {
+  const MangaScreen({super.key});
+
+  @override
+  State<MangaScreen> createState() => _MangaScreenState();
+}
+
+class _MangaScreenState extends State<MangaScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  List<MangaSource> _sources = [];
+  String? _sourceId;
+  List<MangaItem> _items = [];
+  List<MangaShelfItem> _shelf = [];
+  List<MangaReadRecord> _history = [];
+  bool _loading = true;
+  String? _error;
+  int _tab = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _bootstrap() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final sources = await MangaService.getSources();
+      if (!mounted) return;
+      _sources = sources;
+      _sourceId = sources.isNotEmpty ? sources.first.id : null;
+      await Future.wait([
+        _loadDiscover(),
+        _loadLibrary(),
+      ]);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString().replaceFirst('Exception: ', '');
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _loadDiscover() async {
+    try {
+      final query = _searchController.text.trim();
+      final items = query.isEmpty
+          ? (_sourceId == null
+              ? <MangaItem>[]
+              : await MangaService.recommend(sourceId: _sourceId!))
+          : await MangaService.search(query: query, sourceId: _sourceId);
+      if (!mounted) return;
+      setState(() {
+        _items = items;
+        _loading = false;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString().replaceFirst('Exception: ', '');
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _loadLibrary() async {
+    try {
+      final shelf = await MangaService.getShelf();
+      final history = await MangaService.getHistory();
+      if (!mounted) return;
+      setState(() {
+        _shelf = shelf;
+        _history = history;
+      });
+    } catch (_) {
+      // 书架失败不挡住发现页
+    }
+  }
+
+  void _openManga(MangaItem item) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MangaDetailScreen(item: item),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = context.watch<ThemeService>();
+    final textColor =
+        theme.isDarkMode ? Colors.white : const Color(0xFF2c3e50);
+    final muted = theme.isDarkMode
+        ? const Color(0xFFb0b0b0)
+        : const Color(0xFF7f8c8d);
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: _SegmentedTabs(
+                  labels: const ['发现', '书架'],
+                  index: _tab,
+                  onChanged: (index) => setState(() => _tab = index),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (_tab == 0) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: TextField(
+              controller: _searchController,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _loadDiscover(),
+              decoration: InputDecoration(
+                hintText: '搜索漫画',
+                hintStyle: FontUtils.poppins(color: muted, fontSize: 14),
+                prefixIcon: Icon(Icons.search, color: muted),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.arrow_forward, color: Color(0xFF27ae60)),
+                  onPressed: _loadDiscover,
+                ),
+                filled: true,
+                fillColor: theme.isDarkMode
+                    ? const Color(0xFF1e1e1e)
+                    : Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+              style: FontUtils.poppins(color: textColor, fontSize: 14),
+            ),
+          ),
+          if (_sources.isNotEmpty)
+            SizedBox(
+              height: 40,
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                scrollDirection: Axis.horizontal,
+                itemCount: _sources.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final source = _sources[index];
+                  final selected = source.id == _sourceId;
+                  return ChoiceChip(
+                    label: Text(source.name),
+                    selected: selected,
+                    onSelected: (_) {
+                      setState(() => _sourceId = source.id);
+                      _loadDiscover();
+                    },
+                    selectedColor: const Color(0xFF27ae60),
+                    labelStyle: FontUtils.poppins(
+                      fontSize: 12,
+                      color: selected ? Colors.white : textColor,
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null && _tab == 0
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(_error!, style: FontUtils.poppins(color: muted)),
+                      ),
+                    )
+                  : _tab == 0
+                      ? _MangaGrid(items: _items, onTap: _openManga)
+                      : _MangaLibrary(
+                          shelf: _shelf,
+                          history: _history,
+                          onTap: _openManga,
+                        ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SegmentedTabs extends StatelessWidget {
+  final List<String> labels;
+  final int index;
+  final ValueChanged<int> onChanged;
+
+  const _SegmentedTabs({
+    required this.labels,
+    required this.index,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        for (var i = 0; i < labels.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              label: Text(labels[i]),
+              selected: index == i,
+              onSelected: (_) => onChanged(i),
+              selectedColor: const Color(0xFF27ae60),
+              labelStyle: FontUtils.poppins(
+                color: index == i ? Colors.white : const Color(0xFF7f8c8d),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _MangaGrid extends StatelessWidget {
+  final List<MangaItem> items;
+  final ValueChanged<MangaItem> onTap;
+
+  const _MangaGrid({required this.items, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      return Center(
+        child: Text('暂无漫画', style: FontUtils.poppins(color: const Color(0xFF7f8c8d))),
+      );
+    }
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        childAspectRatio: 0.58,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+      ),
+      itemCount: items.length,
+      itemBuilder: (context, index) {
+        final item = items[index];
+        return GestureDetector(
+          onTap: () => onTap(item),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: AuthenticatedImage(url: item.cover),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                item.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: FontUtils.poppins(fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _MangaLibrary extends StatelessWidget {
+  final List<MangaShelfItem> shelf;
+  final List<MangaReadRecord> history;
+  final ValueChanged<MangaItem> onTap;
+
+  const _MangaLibrary({
+    required this.shelf,
+    required this.history,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        Text('书架', style: FontUtils.poppins(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        if (shelf.isEmpty)
+          Text('书架是空的', style: FontUtils.poppins(color: const Color(0xFF7f8c8d)))
+        else
+          ...shelf.map(
+            (item) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: SizedBox(
+                width: 48,
+                height: 64,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: AuthenticatedImage(url: item.cover),
+                ),
+              ),
+              title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+              subtitle: Text(
+                item.lastChapterName.isEmpty ? item.sourceName : item.lastChapterName,
+                maxLines: 1,
+              ),
+              onTap: () => onTap(item.toItem()),
+            ),
+          ),
+        const SizedBox(height: 16),
+        Text('阅读历史', style: FontUtils.poppins(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        if (history.isEmpty)
+          Text('暂无历史', style: FontUtils.poppins(color: const Color(0xFF7f8c8d)))
+        else
+          ...history.map(
+            (item) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+              subtitle: Text(item.chapterName, maxLines: 1),
+              onTap: () => onTap(item.toItem()),
+            ),
+          ),
+      ],
+    );
+  }
+}

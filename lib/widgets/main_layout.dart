@@ -3,10 +3,12 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import 'package:selene/services/search_service.dart';
 import 'package:selene/services/user_data_service.dart';
+import '../models/feature_flags.dart';
 import '../services/theme_service.dart';
 import '../services/api_service.dart';
 import '../utils/device_utils.dart';
 import '../utils/font_utils.dart';
+import 'music_mini_player.dart';
 import 'user_menu.dart';
 import 'dart:io' show Platform;
 import 'dart:async';
@@ -28,6 +30,7 @@ class MainLayout extends StatefulWidget {
   final Function(String)? onSearchSubmitted;
   final VoidCallback? onClearSearch;
   final bool showBottomNav;
+  final List<BottomNavItem>? bottomNavItems;
 
   const MainLayout({
     super.key,
@@ -46,6 +49,7 @@ class MainLayout extends StatefulWidget {
     this.onSearchSubmitted,
     this.onClearSearch,
     this.showBottomNav = true,
+    this.bottomNavItems,
   });
 
   @override
@@ -332,7 +336,14 @@ class _MainLayoutState extends State<MainLayout> {
                       ),
                     ),
                     // 底部导航栏（可选）
-                    if (widget.showBottomNav) _buildBottomNavBar(themeService),
+                    if (widget.showBottomNav)
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const MusicMiniPlayer(),
+                          _buildBottomNavBar(themeService),
+                        ],
+                      ),
                   ],
                 ),
                 // 用户菜单覆盖层 - 现在会覆盖整个屏幕包括navbar
@@ -883,14 +894,8 @@ class _MainLayoutState extends State<MainLayout> {
   }
 
   Widget _buildBottomNavBar(ThemeService themeService) {
-    final List<Map<String, dynamic>> navItems = [
-      {'icon': LucideIcons.house, 'label': '首页'},
-      {'icon': LucideIcons.video, 'label': '电影'},
-      {'icon': LucideIcons.tv, 'label': '剧集'},
-      {'icon': LucideIcons.cat, 'label': '动漫'},
-      {'icon': LucideIcons.clover, 'label': '综艺'},
-      {'icon': LucideIcons.radio, 'label': '直播'},
-    ];
+    final List<BottomNavItem> navItems =
+        widget.bottomNavItems ?? BottomNavItem.videoDefaults;
 
     final isTablet = DeviceUtils.isTablet(context);
 
@@ -914,94 +919,117 @@ class _MainLayoutState extends State<MainLayout> {
         top: 8,
         bottom: MediaQuery.of(context).padding.bottom + 8, // 手动处理底部安全区域
       ),
-      child: Row(
-        mainAxisAlignment:
-            isTablet ? MainAxisAlignment.center : MainAxisAlignment.spaceEvenly,
-        children: [
-          // 平板模式下添加左侧空白
-          if (isTablet) const Spacer(flex: 3),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const itemMinWidth = 72.0;
+          final needsScroll =
+              !isTablet && navItems.length * itemMinWidth > constraints.maxWidth;
+          final row = Row(
+            mainAxisAlignment: isTablet
+                ? MainAxisAlignment.center
+                : (needsScroll
+                    ? MainAxisAlignment.start
+                    : MainAxisAlignment.spaceEvenly),
+            children: [
+              if (isTablet) const Spacer(flex: 3),
+              ...navItems.asMap().entries.expand((entry) {
+                int index = entry.key;
+                final item = entry.value;
+                bool isSelected = !widget.isSearchMode &&
+                    widget.currentBottomNavIndex == index;
+                bool isHovered =
+                    DeviceUtils.isPC() && _hoveredNavIndex == index;
 
-          // 导航按钮
-          ...navItems.asMap().entries.expand((entry) {
-            int index = entry.key;
-            Map<String, dynamic> item = entry.value;
-            bool isSelected =
-                !widget.isSearchMode && widget.currentBottomNavIndex == index;
-            bool isHovered = DeviceUtils.isPC() && _hoveredNavIndex == index;
-
-            return [
-              MouseRegion(
-                cursor: DeviceUtils.isPC()
-                    ? SystemMouseCursors.click
-                    : MouseCursor.defer,
-                onEnter: DeviceUtils.isPC()
-                    ? (_) {
-                        setState(() {
-                          _hoveredNavIndex = index;
-                        });
-                      }
-                    : null,
-                onExit: DeviceUtils.isPC()
-                    ? (_) {
-                        setState(() {
-                          _hoveredNavIndex = null;
-                        });
-                      }
-                    : null,
-                child: GestureDetector(
-                  onTap: () {
-                    widget.onBottomNavChanged(index);
-                  },
-                  behavior: HitTestBehavior.opaque, // 确保整个区域都可以点击
-                  child: Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: isTablet ? 16 : 12,
-                      vertical: 8,
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          item['icon'],
-                          color: isSelected
-                              ? const Color(0xFF27ae60)
-                              : isHovered
-                                  ? const Color(0xFF52c77a) // hover 时的浅绿色
-                                  : themeService.isDarkMode
-                                      ? const Color(0xFFb0b0b0)
-                                      : const Color(0xFF7f8c8d),
-                          size: 24,
+                return [
+                  MouseRegion(
+                    cursor: DeviceUtils.isPC()
+                        ? SystemMouseCursors.click
+                        : MouseCursor.defer,
+                    onEnter: DeviceUtils.isPC()
+                        ? (_) {
+                            setState(() {
+                              _hoveredNavIndex = index;
+                            });
+                          }
+                        : null,
+                    onExit: DeviceUtils.isPC()
+                        ? (_) {
+                            setState(() {
+                              _hoveredNavIndex = null;
+                            });
+                          }
+                        : null,
+                    child: GestureDetector(
+                      onTap: () {
+                        widget.onBottomNavChanged(index);
+                      },
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        width: needsScroll ? itemMinWidth : null,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: isTablet ? 16 : 12,
+                          vertical: 8,
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          item['label'],
-                          style: FontUtils.poppins(
-                            fontSize: 12,
-                            fontWeight:
-                                isSelected ? FontWeight.w600 : FontWeight.w400,
-                            color: isSelected
-                                ? const Color(0xFF27ae60)
-                                : isHovered
-                                    ? const Color(0xFF52c77a) // hover 时的浅绿色
-                                    : themeService.isDarkMode
-                                        ? const Color(0xFFb0b0b0)
-                                        : const Color(0xFF7f8c8d),
-                          ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              item.icon,
+                              color: isSelected
+                                  ? const Color(0xFF27ae60)
+                                  : isHovered
+                                      ? const Color(0xFF52c77a)
+                                      : themeService.isDarkMode
+                                          ? const Color(0xFFb0b0b0)
+                                          : const Color(0xFF7f8c8d),
+                              size: 24,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              item.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: FontUtils.poppins(
+                                fontSize: 12,
+                                fontWeight: isSelected
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                                color: isSelected
+                                    ? const Color(0xFF27ae60)
+                                    : isHovered
+                                        ? const Color(0xFF52c77a)
+                                        : themeService.isDarkMode
+                                            ? const Color(0xFFb0b0b0)
+                                            : const Color(0xFF7f8c8d),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              ),
-              // 平板模式下在按钮之间添加间距
-              if (isTablet && index < navItems.length - 1)
-                const SizedBox(width: 36),
-            ];
-          }),
+                  if (isTablet && index < navItems.length - 1)
+                    const SizedBox(width: 36),
+                ];
+              }),
+              if (isTablet) const Spacer(flex: 3),
+            ],
+          );
 
-          // 平板模式下添加右侧空白
-          if (isTablet) const Spacer(flex: 3),
-        ],
+          if (!needsScroll) {
+            return row;
+          }
+
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minWidth: constraints.maxWidth),
+              child: row,
+            ),
+          );
+        },
       ),
     );
   }

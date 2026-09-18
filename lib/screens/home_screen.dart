@@ -25,6 +25,11 @@ import 'anime_screen.dart';
 import 'show_screen.dart';
 import 'player_screen.dart';
 import 'live_screen.dart';
+import 'manga_screen.dart';
+import 'books_screen.dart';
+import 'music_screen.dart';
+import '../models/feature_flags.dart';
+import '../services/feature_flags_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -38,6 +43,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _selectedTopTab = '首页';
   late PageController _pageController;
   late PageController _bottomNavPageController;
+  FeatureFlags _featureFlags = FeatureFlags.disabled;
 
   @override
   void initState() {
@@ -50,6 +56,15 @@ class _HomeScreenState extends State<HomeScreen> {
     _refreshCacheOnHomeEnter();
     // 检查应用更新
     _checkForUpdates();
+    _loadFeatureFlags();
+  }
+
+  Future<void> _loadFeatureFlags() async {
+    final flags = await FeatureFlagsService.refresh();
+    if (!mounted) return;
+    setState(() {
+      _featureFlags = flags;
+    });
   }
 
   /// 检查应用更新
@@ -397,6 +412,7 @@ class _HomeScreenState extends State<HomeScreen> {
       onTopTabChanged: _onTopTabChanged,
       onHomeTap: _onHomeTap,
       onSearchTap: _onSearchTap,
+      bottomNavItems: _featureFlags.buildNavItems(),
     );
   }
 
@@ -419,6 +435,9 @@ class _HomeScreenState extends State<HomeScreen> {
         const AnimeScreen(),
         const ShowScreen(),
         const LiveScreen(),
+        if (_featureFlags.suwayomiEnabled) const MangaScreen(),
+        if (_featureFlags.booksEnabled) const BooksScreen(),
+        if (_featureFlags.musicEnabled) const MusicScreen(),
       ],
     );
   }
