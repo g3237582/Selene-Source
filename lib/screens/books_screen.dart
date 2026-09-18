@@ -5,6 +5,7 @@ import '../models/book.dart';
 import '../services/books_service.dart';
 import '../services/theme_service.dart';
 import '../utils/font_utils.dart';
+import '../utils/paged_list.dart';
 import '../widgets/authenticated_image.dart';
 import 'book_detail_screen.dart';
 
@@ -17,24 +18,38 @@ class BooksScreen extends StatefulWidget {
 
 class _BooksScreenState extends State<BooksScreen> {
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   List<BookSource> _sources = [];
   String? _sourceId;
-  List<BookItem> _items = [];
+  PagedListState<BookItem> _page = const PagedListState();
   List<BookItem> _shelf = [];
   bool _loading = true;
+  bool _loadingMore = false;
   String? _error;
   int _tab = 0;
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _bootstrap();
   }
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    handlePagedScroll(
+      _scrollController,
+      hasMore: _page.hasMore,
+      isBusy: _loading || _loadingMore,
+      onLoadMore: () => _loadBooks(reset: false),
+    );
   }
 
   Future<void> _bootstrap() async {
@@ -42,47 +57,76 @@ class _BooksScreenState extends State<BooksScreen> {
       _loading = true;
       _error = null;
     });
+    await Future.wait([
+      _loadSources(),
+      _loadShelf(),
+    ]);
+    if (!mounted) return;
+    await _loadBooks(reset: true);
+  }
+
+  Future<void> _loadSources() async {
     try {
       final sources = await BooksService.getSources();
       if (!mounted) return;
-      _sources = sources;
-      _sourceId = sources.isNotEmpty ? sources.first.id : null;
-      await Future.wait([_loadBooks(), _loadShelf()]);
+      setState(() {
+        _sources = sources;
+        _sourceId ??= sources.isNotEmpty ? sources.first.id : null;
+      });
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _error = error.toString().replaceFirst('Exception: ', '');
-        _loading = false;
       });
     }
   }
 
-  Future<void> _loadBooks() async {
-    try {
-      final query = _searchController.text.trim();
-      List<BookItem> items;
-      if (query.isNotEmpty) {
-        items = await BooksService.search(query: query, sourceId: _sourceId);
-      } else if (_sourceId != null) {
-        try {
-          items = await BooksService.catalog(sourceId: _sourceId!);
-        } catch (_) {
-          items = [];
-        }
+  Future<void> _loadBooks({required bool reset}) async {
+    if (!reset && (_loading || _loadingMore || !_page.hasMore)) return;
+    final query = _searchController.text.trim();
+
+    setState(() {
+      if (reset) {
+        _loading = true;
+        _page = const PagedListState();
+        _error = null;
       } else {
-        items = [];
+        _loadingMore = true;
+      }
+    });
+
+    try {
+      PagedResult<BookItem> result;
+      if (query.isNotEmpty) {
+        final items = await BooksService.search(query: query, sourceId: _sourceId);
+        result = PagedResult(items: items, hasMore: false);
+      } else if (_sourceId != null) {
+        result = await BooksService.catalog(
+          sourceId: _sourceId!,
+          href: reset ? '' : _page.nextToken,
+        );
+      } else {
+        result = const PagedResult(items: [], hasMore: false);
       }
       if (!mounted) return;
       setState(() {
-        _items = items;
+        _page = (reset ? const PagedListState<BookItem>() : _page).append(result);
         _loading = false;
+        _loadingMore = false;
         _error = null;
       });
+      if (reset) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _onScroll();
+        });
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _error = error.toString().replaceFirst('Exception: ', '');
         _loading = false;
+        _loadingMore = false;
       });
     }
   }
@@ -144,14 +188,14 @@ class _BooksScreenState extends State<BooksScreen> {
             child: TextField(
               controller: _searchController,
               textInputAction: TextInputAction.search,
-              onSubmitted: (_) => _loadBooks(),
+              onSubmitted: (_) => _loadBooks(reset: true),
               decoration: InputDecoration(
                 hintText: '搜索电子书',
                 hintStyle: FontUtils.poppins(color: muted, fontSize: 14),
                 prefixIcon: Icon(Icons.search, color: muted),
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.arrow_forward, color: Color(0xFF27ae60)),
-                  onPressed: _loadBooks,
+                  onPressed: () => _loadBooks(reset: true),
                 ),
                 filled: true,
                 fillColor:
@@ -178,7 +222,7 @@ class _BooksScreenState extends State<BooksScreen> {
                     selected: selected,
                     onSelected: (_) {
                       setState(() => _sourceId = source.id);
-                      _loadBooks();
+                      _loadBooks(reset: true);
                     },
                     selectedColor: const Color(0xFF27ae60),
                     labelStyle: FontUtils.poppins(
@@ -193,18 +237,31 @@ class _BooksScreenState extends State<BooksScreen> {
             ),
         ],
         Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _error != null && _tab == 0
-                  ? Center(child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text(_error!, style: FontUtils.poppins(color: muted)),
-                    ))
-                  : _tab == 0
-                      ? _BookList(items: _items, onTap: _openBook)
-                      : _BookList(items: _shelf, onTap: _openBook),
+          child: _tab == 0
+              ? _buildDiscover(muted)
+              : _BookList(items: _shelf, onTap: _openBook),
         ),
       ],
+    );
+  }
+
+  Widget _buildDiscover(Color muted) {
+    if (_loading && _page.items.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null && _page.items.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(_error!, style: FontUtils.poppins(color: muted)),
+        ),
+      );
+    }
+    return _BookList(
+      items: _page.items,
+      controller: _scrollController,
+      loadingMore: _loadingMore,
+      onTap: _openBook,
     );
   }
 }
@@ -212,8 +269,15 @@ class _BooksScreenState extends State<BooksScreen> {
 class _BookList extends StatelessWidget {
   final List<BookItem> items;
   final ValueChanged<BookItem> onTap;
+  final ScrollController? controller;
+  final bool loadingMore;
 
-  const _BookList({required this.items, required this.onTap});
+  const _BookList({
+    required this.items,
+    required this.onTap,
+    this.controller,
+    this.loadingMore = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -223,10 +287,17 @@ class _BookList extends StatelessWidget {
       );
     }
     return ListView.separated(
+      controller: controller,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      itemCount: items.length,
+      itemCount: items.length + (loadingMore ? 1 : 0),
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (context, index) {
+        if (index >= items.length) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+        }
         final book = items[index];
         return ListTile(
           contentPadding: EdgeInsets.zero,

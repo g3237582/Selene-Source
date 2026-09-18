@@ -6,6 +6,7 @@ import '../services/music_player_service.dart';
 import '../services/music_service.dart';
 import '../services/theme_service.dart';
 import '../utils/font_utils.dart';
+import '../utils/paged_list.dart';
 import '../widgets/authenticated_image.dart';
 import 'music_player_screen.dart';
 
@@ -18,42 +19,81 @@ class MusicScreen extends StatefulWidget {
 
 class _MusicScreenState extends State<MusicScreen> {
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   String _source = 'wy';
-  List<MusicTrack> _tracks = [];
+  PagedListState<MusicTrack> _page = const PagedListState();
   bool _loading = false;
+  bool _loadingMore = false;
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _search() async {
+  void _onScroll() {
+    handlePagedScroll(
+      _scrollController,
+      hasMore: _page.hasMore,
+      isBusy: _loading || _loadingMore,
+      onLoadMore: () => _search(reset: false),
+    );
+  }
+
+  Future<void> _search({required bool reset}) async {
     final query = _searchController.text.trim();
     if (query.isEmpty) return;
+    if (!reset && (_loading || _loadingMore || !_page.hasMore)) return;
+
     setState(() {
-      _loading = true;
-      _error = null;
+      if (reset) {
+        _loading = true;
+        _page = const PagedListState();
+        _error = null;
+      } else {
+        _loadingMore = true;
+      }
     });
+
     try {
-      final tracks = await MusicService.search(query: query, source: _source);
+      final result = await MusicService.search(
+        query: query,
+        source: _source,
+        page: reset ? 1 : _page.nextPage,
+      );
       if (!mounted) return;
       setState(() {
-        _tracks = tracks;
+        _page = (reset ? const PagedListState<MusicTrack>() : _page).append(result);
         _loading = false;
+        _loadingMore = false;
       });
+      if (reset) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _onScroll();
+        });
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _error = error.toString().replaceFirst('Exception: ', '');
         _loading = false;
+        _loadingMore = false;
       });
     }
   }
 
   Future<void> _play(MusicTrack track) async {
-    await MusicPlayerService.instance.playTrack(track, playlist: _tracks);
+    await MusicPlayerService.instance.playTrack(track, playlist: _page.items);
   }
 
   @override
@@ -76,14 +116,14 @@ class _MusicScreenState extends State<MusicScreen> {
               child: TextField(
                 controller: _searchController,
                 textInputAction: TextInputAction.search,
-                onSubmitted: (_) => _search(),
+                onSubmitted: (_) => _search(reset: true),
                 decoration: InputDecoration(
                   hintText: '搜索歌曲、歌手',
                   hintStyle: FontUtils.poppins(color: muted, fontSize: 14),
                   prefixIcon: Icon(Icons.search, color: muted),
                   suffixIcon: IconButton(
                     icon: const Icon(Icons.arrow_forward, color: Color(0xFF27ae60)),
-                    onPressed: _search,
+                    onPressed: () => _search(reset: true),
                   ),
                   filled: true,
                   fillColor: theme.isDarkMode
@@ -112,7 +152,7 @@ class _MusicScreenState extends State<MusicScreen> {
                         onSelected: (_) {
                           setState(() => _source = entry.key);
                           if (_searchController.text.trim().isNotEmpty) {
-                            _search();
+                            _search(reset: true);
                           }
                         },
                         selectedColor: const Color(0xFF27ae60),
@@ -133,82 +173,82 @@ class _MusicScreenState extends State<MusicScreen> {
                   style: FontUtils.poppins(color: const Color(0xFFe74c3c), fontSize: 12),
                 ),
               ),
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _error != null
-                      ? Center(child: Text(_error!, style: FontUtils.poppins(color: muted)))
-                      : _tracks.isEmpty
-                          ? Center(
-                              child: Text(
-                                '搜索歌曲后即可播放',
-                                style: FontUtils.poppins(color: muted),
-                              ),
-                            )
-                          : ListView.builder(
-                              padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
-                              itemCount: _tracks.length,
-                              itemBuilder: (context, index) {
-                                final track = _tracks[index];
-                                final playing = player.current?.songId == track.songId;
-                                return ListTile(
-                                  leading: SizedBox(
-                                    width: 48,
-                                    height: 48,
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(6),
-                                      child: track.cover.isEmpty
-                                          ? const ColoredBox(
-                                              color: Color(0xFF2c3e50),
-                                              child: Icon(Icons.music_note,
-                                                  color: Colors.white70),
-                                            )
-                                          : AuthenticatedImage(url: track.cover),
-                                    ),
-                                  ),
-                                  title: Text(
-                                    track.name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: FontUtils.poppins(
-                                      fontWeight: playing
-                                          ? FontWeight.w600
-                                          : FontWeight.w400,
-                                      color: playing
-                                          ? const Color(0xFF27ae60)
-                                          : textColor,
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    [
-                                      track.artist,
-                                      track.album,
-                                      musicSourceLabels[track.source] ?? track.source,
-                                    ].where((item) => item.isNotEmpty).join(' · '),
-                                    maxLines: 1,
-                                  ),
-                                  trailing: IconButton(
-                                    icon: Icon(
-                                      playing && player.playing
-                                          ? Icons.pause_circle
-                                          : Icons.play_circle,
-                                      color: const Color(0xFF27ae60),
-                                    ),
-                                    onPressed: () => _play(track),
-                                  ),
-                                  onTap: () => _play(track),
-                                  onLongPress: () {
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => const MusicPlayerScreen(),
-                                      ),
-                                    );
-                                  },
-                                );
-                              },
-                            ),
-            ),
+            Expanded(child: _buildList(player, textColor, muted)),
           ],
+        );
+      },
+    );
+  }
+
+  Widget _buildList(MusicPlayerService player, Color textColor, Color muted) {
+    if (_loading && _page.items.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null && _page.items.isEmpty) {
+      return Center(child: Text(_error!, style: FontUtils.poppins(color: muted)));
+    }
+    if (_page.items.isEmpty) {
+      return Center(
+        child: Text('搜索歌曲后即可播放', style: FontUtils.poppins(color: muted)),
+      );
+    }
+    return ListView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
+      itemCount: _page.items.length + (_loadingMore ? 1 : 0),
+      itemBuilder: (context, index) {
+        if (index >= _page.items.length) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+        }
+        final track = _page.items[index];
+        final playing = player.current?.songId == track.songId;
+        return ListTile(
+          leading: SizedBox(
+            width: 48,
+            height: 48,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: track.cover.isEmpty
+                  ? const ColoredBox(
+                      color: Color(0xFF2c3e50),
+                      child: Icon(Icons.music_note, color: Colors.white70),
+                    )
+                  : AuthenticatedImage(url: track.cover),
+            ),
+          ),
+          title: Text(
+            track.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: FontUtils.poppins(
+              fontWeight: playing ? FontWeight.w600 : FontWeight.w400,
+              color: playing ? const Color(0xFF27ae60) : textColor,
+            ),
+          ),
+          subtitle: Text(
+            [
+              track.artist,
+              track.album,
+              musicSourceLabels[track.source] ?? track.source,
+            ].where((item) => item.isNotEmpty).join(' · '),
+            maxLines: 1,
+          ),
+          trailing: IconButton(
+            icon: Icon(
+              playing && player.playing ? Icons.pause_circle : Icons.play_circle,
+              color: const Color(0xFF27ae60),
+            ),
+            onPressed: () => _play(track),
+          ),
+          onTap: () => _play(track),
+          onLongPress: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const MusicPlayerScreen()),
+            );
+          },
         );
       },
     );

@@ -1,5 +1,6 @@
 import '../models/manga.dart';
 import '../utils/json_records.dart';
+import '../utils/paged_list.dart';
 import 'api_service.dart';
 
 class MangaService {
@@ -18,7 +19,7 @@ class MangaService {
         .toList();
   }
 
-  static Future<List<MangaItem>> search({
+  static Future<PagedResult<MangaItem>> search({
     required String query,
     String? sourceId,
     int page = 1,
@@ -35,14 +36,17 @@ class MangaService {
     if (!response.success || response.data == null) {
       throw Exception(response.message ?? '搜索漫画失败');
     }
-    final results = response.data!['results'] as List? ?? [];
-    return results
+    final results = (response.data!['results'] as List? ?? [])
         .whereType<Map>()
         .map((item) => MangaItem.fromJson(Map<String, dynamic>.from(item)))
         .toList();
+    return PagedResult(
+      items: results,
+      hasMore: inferHasMore(itemCount: results.length, pageSize: 20),
+    );
   }
 
-  static Future<List<MangaItem>> recommend({
+  static Future<PagedResult<MangaItem>> recommend({
     required String sourceId,
     int page = 1,
     String type = 'POPULAR',
@@ -59,11 +63,14 @@ class MangaService {
     if (!response.success || response.data == null) {
       throw Exception(response.message ?? '获取推荐漫画失败');
     }
-    final mangas = response.data!['mangas'] as List? ?? [];
-    return mangas
+    final mangas = (response.data!['mangas'] as List? ?? [])
         .whereType<Map>()
         .map((item) => MangaItem.fromJson(Map<String, dynamic>.from(item)))
         .toList();
+    return PagedResult(
+      items: mangas,
+      hasMore: response.data!['hasNextPage'] == true,
+    );
   }
 
   static Future<MangaDetail> getDetail({

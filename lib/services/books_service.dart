@@ -1,5 +1,6 @@
 import '../models/book.dart';
 import '../utils/json_records.dart';
+import '../utils/paged_list.dart';
 import 'api_service.dart';
 
 class BooksService {
@@ -45,7 +46,7 @@ class BooksService {
         .toList();
   }
 
-  static Future<List<BookItem>> catalog({
+  static Future<PagedResult<BookItem>> catalog({
     required String sourceId,
     String href = '',
   }) async {
@@ -60,11 +61,16 @@ class BooksService {
     if (!response.success || response.data == null) {
       throw Exception(response.message ?? '获取书源目录失败');
     }
-    final entries = response.data!['entries'] as List? ?? [];
-    return entries
+    final entries = (response.data!['entries'] as List? ?? [])
         .whereType<Map>()
         .map((item) => BookItem.fromJson(Map<String, dynamic>.from(item)))
         .toList();
+    final nextHref = response.data!['nextHref']?.toString() ?? '';
+    return PagedResult(
+      items: entries,
+      hasMore: nextHref.isNotEmpty,
+      nextToken: nextHref,
+    );
   }
 
   static Future<BookItem> getDetail(BookItem book) async {

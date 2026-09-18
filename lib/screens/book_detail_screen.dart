@@ -18,7 +18,7 @@ class BookDetailScreen extends StatefulWidget {
 class _BookDetailScreenState extends State<BookDetailScreen> {
   late BookItem _book;
   List<BookChapter> _chapters = [];
-  bool _loading = true;
+  bool _loadingChapters = true;
   String? _error;
 
   @override
@@ -30,25 +30,52 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
 
   Future<void> _load() async {
     setState(() {
-      _loading = true;
+      _loadingChapters = true;
       _error = null;
     });
+
+    final detailFuture = BooksService.getDetail(_book);
+    final chaptersFuture = BooksService.getChapters(_book);
+
+    BookItem detail = _book;
+    List<BookChapter> chapters = [];
+    String? error;
+
     try {
-      final detail = await BooksService.getDetail(_book);
-      final chapters = await BooksService.getChapters(detail);
-      if (!mounted) return;
-      setState(() {
-        _book = detail;
-        _chapters = chapters;
-        _loading = false;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _error = error.toString().replaceFirst('Exception: ', '');
-        _loading = false;
-      });
+      detail = await detailFuture;
+    } catch (err) {
+      error = err.toString().replaceFirst('Exception: ', '');
     }
+
+    try {
+      chapters = await chaptersFuture;
+    } catch (_) {
+      try {
+        chapters = await BooksService.getChapters(detail);
+      } catch (err) {
+        error ??= err.toString().replaceFirst('Exception: ', '');
+      }
+    }
+
+    if (chapters.isEmpty &&
+        detail.detailHref.isNotEmpty &&
+        detail.detailHref != widget.book.detailHref) {
+      try {
+        chapters = await BooksService.getChapters(detail);
+      } catch (err) {
+        error ??= err.toString().replaceFirst('Exception: ', '');
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _book = detail;
+      _chapters = chapters;
+      _loadingChapters = false;
+      if (chapters.isEmpty) {
+        _error = error;
+      }
+    });
   }
 
   Future<void> _addToShelf() async {
@@ -91,79 +118,115 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(_error!),
-                  ),
-                )
-              : ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: SizedBox(
-                            width: 96,
-                            height: 128,
-                            child: _book.cover.isEmpty
-                                ? const ColoredBox(
-                                    color: Color(0xFF2c3e50),
-                                    child: Icon(Icons.menu_book, color: Colors.white70),
-                                  )
-                                : AuthenticatedImage(url: _book.cover),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _book.title,
-                                style: FontUtils.poppins(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              if (_book.author.isNotEmpty) ...[
-                                const SizedBox(height: 8),
-                                Text(_book.author),
-                              ],
-                              Text(_book.sourceName),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (_book.summary.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Text(_book.summary),
-                    ],
-                    const SizedBox(height: 20),
-                    Text(
-                      _chapters.isEmpty ? '章节' : '章节 ${_chapters.length}',
-                      style: FontUtils.poppins(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 8),
-                    if (_chapters.isEmpty)
-                      const Text('该书暂不支持章节阅读。EPUB 文件流会在后续版本接入。')
-                    else
-                      ..._chapters.map(
-                        (chapter) => ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(chapter.title),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => _openChapter(chapter),
-                        ),
-                      ),
-                  ],
+      body: CustomScrollView(
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            sliver: SliverToBoxAdapter(
+              child: _BookHeader(book: _book),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            sliver: SliverToBoxAdapter(
+              child: Text(
+                _chapters.isEmpty ? '章节' : '章节 ${_chapters.length}',
+                style: FontUtils.poppins(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+          if (_loadingChapters)
+            const SliverFillRemaining(
+              hasScrollBody: false,
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_chapters.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  _error ?? '该书暂不支持章节阅读。EPUB 文件流会在后续版本接入。',
                 ),
+              ),
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final chapter = _chapters[index];
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(chapter.title),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => _openChapter(chapter),
+                    );
+                  },
+                  childCount: _chapters.length,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BookHeader extends StatelessWidget {
+  final BookItem book;
+
+  const _BookHeader({required this.book});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 96,
+                height: 128,
+                child: book.cover.isEmpty
+                    ? const ColoredBox(
+                        color: Color(0xFF2c3e50),
+                        child: Icon(Icons.menu_book, color: Colors.white70),
+                      )
+                    : AuthenticatedImage(url: book.cover),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    book.title,
+                    style: FontUtils.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (book.author.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(book.author),
+                  ],
+                  Text(book.sourceName),
+                ],
+              ),
+            ),
+          ],
+        ),
+        if (book.summary.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Text(book.summary),
+        ],
+      ],
     );
   }
 }

@@ -5,6 +5,7 @@ import '../models/manga.dart';
 import '../services/manga_service.dart';
 import '../services/theme_service.dart';
 import '../utils/font_utils.dart';
+import '../utils/paged_list.dart';
 import '../widgets/authenticated_image.dart';
 import 'manga_detail_screen.dart';
 
@@ -17,25 +18,39 @@ class MangaScreen extends StatefulWidget {
 
 class _MangaScreenState extends State<MangaScreen> {
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   List<MangaSource> _sources = [];
   String? _sourceId;
-  List<MangaItem> _items = [];
+  PagedListState<MangaItem> _page = const PagedListState();
   List<MangaShelfItem> _shelf = [];
   List<MangaReadRecord> _history = [];
   bool _loading = true;
+  bool _loadingMore = false;
   String? _error;
   int _tab = 0;
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _bootstrap();
   }
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    handlePagedScroll(
+      _scrollController,
+      hasMore: _page.hasMore,
+      isBusy: _loading || _loadingMore,
+      onLoadMore: () => _loadDiscover(reset: false),
+    );
   }
 
   Future<void> _bootstrap() async {
@@ -43,66 +58,102 @@ class _MangaScreenState extends State<MangaScreen> {
       _loading = true;
       _error = null;
     });
+    await Future.wait([
+      _loadSources(),
+      _loadLibrary(),
+    ]);
+    if (!mounted) return;
+    await _loadDiscover(reset: true);
+  }
+
+  Future<void> _loadSources() async {
     try {
       final sources = await MangaService.getSources();
       if (!mounted) return;
-      _sources = sources;
-      _sourceId = sources.isNotEmpty ? sources.first.id : null;
-      await Future.wait([
-        _loadDiscover(),
-        _loadLibrary(),
-      ]);
+      setState(() {
+        _sources = sources;
+        _sourceId ??= sources.isNotEmpty ? sources.first.id : null;
+      });
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _error = error.toString().replaceFirst('Exception: ', '');
-        _loading = false;
       });
     }
   }
 
-  Future<void> _loadDiscover() async {
+  Future<void> _loadDiscover({required bool reset}) async {
+    if (!reset && (_loading || _loadingMore || !_page.hasMore)) return;
+    final query = _searchController.text.trim();
+    if (query.isEmpty && _sourceId == null) {
+      setState(() {
+        _loading = false;
+        _page = const PagedListState();
+      });
+      return;
+    }
+
+    setState(() {
+      if (reset) {
+        _loading = true;
+        _page = const PagedListState();
+        _error = null;
+      } else {
+        _loadingMore = true;
+      }
+    });
+
     try {
-      final query = _searchController.text.trim();
-      final items = query.isEmpty
-          ? (_sourceId == null
-              ? <MangaItem>[]
-              : await MangaService.recommend(sourceId: _sourceId!))
-          : await MangaService.search(query: query, sourceId: _sourceId);
+      final result = query.isEmpty
+          ? await MangaService.recommend(
+              sourceId: _sourceId!,
+              page: reset ? 1 : _page.nextPage,
+            )
+          : await MangaService.search(
+              query: query,
+              sourceId: _sourceId,
+              page: reset ? 1 : _page.nextPage,
+            );
       if (!mounted) return;
       setState(() {
-        _items = items;
+        _page = (reset ? const PagedListState<MangaItem>() : _page).append(result);
         _loading = false;
+        _loadingMore = false;
         _error = null;
       });
+      if (reset) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _onScroll();
+        });
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _error = error.toString().replaceFirst('Exception: ', '');
         _loading = false;
+        _loadingMore = false;
       });
     }
   }
 
   Future<void> _loadLibrary() async {
     try {
-      final shelf = await MangaService.getShelf();
-      final history = await MangaService.getHistory();
+      final results = await Future.wait([
+        MangaService.getShelf(),
+        MangaService.getHistory(),
+      ]);
       if (!mounted) return;
       setState(() {
-        _shelf = shelf;
-        _history = history;
+        _shelf = results[0] as List<MangaShelfItem>;
+        _history = results[1] as List<MangaReadRecord>;
       });
-    } catch (_) {
-      // 书架失败不挡住发现页
-    }
+    } catch (_) {}
   }
 
   void _openManga(MangaItem item) {
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => MangaDetailScreen(item: item),
-      ),
+      MaterialPageRoute(builder: (_) => MangaDetailScreen(item: item)),
     );
   }
 
@@ -121,13 +172,9 @@ class _MangaScreenState extends State<MangaScreen> {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: Row(
             children: [
-              Expanded(
-                child: _SegmentedTabs(
-                  labels: const ['发现', '书架'],
-                  index: _tab,
-                  onChanged: (index) => setState(() => _tab = index),
-                ),
-              ),
+              _Chip(label: '发现', selected: _tab == 0, muted: muted, onTap: () => setState(() => _tab = 0)),
+              const SizedBox(width: 8),
+              _Chip(label: '书架', selected: _tab == 1, muted: muted, onTap: () => setState(() => _tab = 1)),
             ],
           ),
         ),
@@ -137,19 +184,17 @@ class _MangaScreenState extends State<MangaScreen> {
             child: TextField(
               controller: _searchController,
               textInputAction: TextInputAction.search,
-              onSubmitted: (_) => _loadDiscover(),
+              onSubmitted: (_) => _loadDiscover(reset: true),
               decoration: InputDecoration(
                 hintText: '搜索漫画',
                 hintStyle: FontUtils.poppins(color: muted, fontSize: 14),
                 prefixIcon: Icon(Icons.search, color: muted),
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.arrow_forward, color: Color(0xFF27ae60)),
-                  onPressed: _loadDiscover,
+                  onPressed: () => _loadDiscover(reset: true),
                 ),
                 filled: true,
-                fillColor: theme.isDarkMode
-                    ? const Color(0xFF1e1e1e)
-                    : Colors.white,
+                fillColor: theme.isDarkMode ? const Color(0xFF1e1e1e) : Colors.white,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -174,7 +219,7 @@ class _MangaScreenState extends State<MangaScreen> {
                     selected: selected,
                     onSelected: (_) {
                       setState(() => _sourceId = source.id);
-                      _loadDiscover();
+                      _loadDiscover(reset: true);
                     },
                     selectedColor: const Color(0xFF27ae60),
                     labelStyle: FontUtils.poppins(
@@ -187,66 +232,72 @@ class _MangaScreenState extends State<MangaScreen> {
             ),
         ],
         Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _error != null && _tab == 0
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(_error!, style: FontUtils.poppins(color: muted)),
-                      ),
-                    )
-                  : _tab == 0
-                      ? _MangaGrid(items: _items, onTap: _openManga)
-                      : _MangaLibrary(
-                          shelf: _shelf,
-                          history: _history,
-                          onTap: _openManga,
-                        ),
+          child: _tab == 0
+              ? _buildDiscover(muted)
+              : _MangaLibrary(shelf: _shelf, history: _history, onTap: _openManga),
         ),
       ],
     );
   }
+
+  Widget _buildDiscover(Color muted) {
+    if (_loading && _page.items.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null && _page.items.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(_error!, style: FontUtils.poppins(color: muted)),
+        ),
+      );
+    }
+    return _MangaGrid(
+      items: _page.items,
+      controller: _scrollController,
+      loadingMore: _loadingMore,
+      onTap: _openManga,
+    );
+  }
 }
 
-class _SegmentedTabs extends StatelessWidget {
-  final List<String> labels;
-  final int index;
-  final ValueChanged<int> onChanged;
+class _Chip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final Color muted;
+  final VoidCallback onTap;
 
-  const _SegmentedTabs({
-    required this.labels,
-    required this.index,
-    required this.onChanged,
+  const _Chip({
+    required this.label,
+    required this.selected,
+    required this.muted,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        for (var i = 0; i < labels.length; i++)
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: ChoiceChip(
-              label: Text(labels[i]),
-              selected: index == i,
-              onSelected: (_) => onChanged(i),
-              selectedColor: const Color(0xFF27ae60),
-              labelStyle: FontUtils.poppins(
-                color: index == i ? Colors.white : const Color(0xFF7f8c8d),
-              ),
-            ),
-          ),
-      ],
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onTap(),
+      selectedColor: const Color(0xFF27ae60),
+      labelStyle: FontUtils.poppins(color: selected ? Colors.white : muted),
     );
   }
 }
 
 class _MangaGrid extends StatelessWidget {
   final List<MangaItem> items;
+  final ScrollController controller;
+  final bool loadingMore;
   final ValueChanged<MangaItem> onTap;
 
-  const _MangaGrid({required this.items, required this.onTap});
+  const _MangaGrid({
+    required this.items,
+    required this.controller,
+    required this.loadingMore,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -256,6 +307,7 @@ class _MangaGrid extends StatelessWidget {
       );
     }
     return GridView.builder(
+      controller: controller,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
@@ -263,8 +315,11 @@ class _MangaGrid extends StatelessWidget {
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
       ),
-      itemCount: items.length,
+      itemCount: items.length + (loadingMore ? 1 : 0),
       itemBuilder: (context, index) {
+        if (index >= items.length) {
+          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+        }
         final item = items[index];
         return GestureDetector(
           onTap: () => onTap(item),
@@ -305,45 +360,81 @@ class _MangaLibrary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      children: [
-        Text('书架', style: FontUtils.poppins(fontWeight: FontWeight.w600)),
-        const SizedBox(height: 8),
+    return CustomScrollView(
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          sliver: SliverToBoxAdapter(
+            child: Text('书架', style: FontUtils.poppins(fontWeight: FontWeight.w600)),
+          ),
+        ),
         if (shelf.isEmpty)
-          Text('书架是空的', style: FontUtils.poppins(color: const Color(0xFF7f8c8d)))
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver: SliverToBoxAdapter(
+              child: Text('书架是空的', style: FontUtils.poppins(color: const Color(0xFF7f8c8d))),
+            ),
+          )
         else
-          ...shelf.map(
-            (item) => ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: SizedBox(
-                width: 48,
-                height: 64,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: AuthenticatedImage(url: item.cover),
-                ),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final item = shelf[index];
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: SizedBox(
+                      width: 48,
+                      height: 64,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: AuthenticatedImage(url: item.cover),
+                      ),
+                    ),
+                    title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(
+                      item.lastChapterName.isEmpty
+                          ? item.sourceName
+                          : item.lastChapterName,
+                      maxLines: 1,
+                    ),
+                    onTap: () => onTap(item.toItem()),
+                  );
+                },
+                childCount: shelf.length,
               ),
-              title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-              subtitle: Text(
-                item.lastChapterName.isEmpty ? item.sourceName : item.lastChapterName,
-                maxLines: 1,
-              ),
-              onTap: () => onTap(item.toItem()),
             ),
           ),
-        const SizedBox(height: 16),
-        Text('阅读历史', style: FontUtils.poppins(fontWeight: FontWeight.w600)),
-        const SizedBox(height: 8),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          sliver: SliverToBoxAdapter(
+            child: Text('阅读历史', style: FontUtils.poppins(fontWeight: FontWeight.w600)),
+          ),
+        ),
         if (history.isEmpty)
-          Text('暂无历史', style: FontUtils.poppins(color: const Color(0xFF7f8c8d)))
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            sliver: SliverToBoxAdapter(
+              child: Text('暂无历史', style: FontUtils.poppins(color: const Color(0xFF7f8c8d))),
+            ),
+          )
         else
-          ...history.map(
-            (item) => ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-              subtitle: Text(item.chapterName, maxLines: 1),
-              onTap: () => onTap(item.toItem()),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final item = history[index];
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(item.chapterName, maxLines: 1),
+                    onTap: () => onTap(item.toItem()),
+                  );
+                },
+                childCount: history.length,
+              ),
             ),
           ),
       ],

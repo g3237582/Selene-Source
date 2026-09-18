@@ -1,9 +1,10 @@
 import '../models/music_track.dart';
+import '../utils/paged_list.dart';
 import 'api_service.dart';
 import 'user_data_service.dart';
 
 class MusicService {
-  static Future<List<MusicTrack>> search({
+  static Future<PagedResult<MusicTrack>> search({
     required String query,
     String source = 'wy',
     int page = 1,
@@ -26,11 +27,15 @@ class MusicService {
     final data = payload['data'] is Map
         ? Map<String, dynamic>.from(payload['data'] as Map)
         : payload;
-    final list = data['list'] as List? ?? [];
-    return list
+    final list = (data['list'] as List? ?? [])
         .whereType<Map>()
         .map((item) => MusicTrack.fromJson(Map<String, dynamic>.from(item)))
         .toList();
+    return PagedResult(
+      items: list,
+      hasMore: data['hasMore'] == true ||
+          inferHasMore(itemCount: list.length, pageSize: 20),
+    );
   }
 
   static Future<MusicPlayResult> play(MusicTrack track) async {
