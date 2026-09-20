@@ -5,6 +5,7 @@ import '../models/manga.dart';
 import '../services/manga_service.dart';
 import '../services/theme_service.dart';
 import '../utils/font_utils.dart';
+import '../utils/remote_error.dart';
 import '../widgets/authenticated_image.dart';
 import 'manga_reader_screen.dart';
 
@@ -22,6 +23,7 @@ class _MangaDetailScreenState extends State<MangaDetailScreen> {
   bool _loading = true;
   bool _onShelf = false;
   String? _error;
+  RemoteErrorInfo? _remoteError;
 
   @override
   void initState() {
@@ -29,38 +31,57 @@ class _MangaDetailScreenState extends State<MangaDetailScreen> {
     _load();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool confirmAdult = false}) async {
     setState(() {
       _loading = true;
       _error = null;
+      _remoteError = null;
     });
     try {
-      final results = await Future.wait([
-        MangaService.getDetail(
-          mangaId: widget.item.id,
-          sourceId: widget.item.sourceId,
-          title: widget.item.title,
-          cover: widget.item.cover,
-          sourceName: widget.item.sourceName,
-        ),
-        MangaService.getShelf(),
-      ]);
-      if (!mounted) return;
-      final detail = results[0] as MangaDetail;
-      final shelf = results[1] as List<MangaShelfItem>;
-      setState(() {
-        _detail = detail;
-        _onShelf = shelf.any(
+      final detail = confirmAdult
+          ? await MangaService.sendCommand(
+              command: kConfirmAdultCommand,
+              mangaId: widget.item.id,
+              sourceId: widget.item.sourceId,
+              title: widget.item.title,
+              cover: widget.item.cover,
+              sourceName: widget.item.sourceName,
+            )
+          : await MangaService.getDetail(
+              mangaId: widget.item.id,
+              sourceId: widget.item.sourceId,
+              title: widget.item.title,
+              cover: widget.item.cover,
+              sourceName: widget.item.sourceName,
+            );
+      var onShelf = _onShelf;
+      try {
+        final shelf = await MangaService.getShelf();
+        onShelf = shelf.any(
           (item) => item.sourceId == detail.sourceId && item.mangaId == detail.id,
         );
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() {
+        _detail = detail;
+        _onShelf = onShelf;
         _loading = false;
       });
     } catch (error) {
       if (!mounted) return;
+      final parsed = parseRemoteError(error, fallback: '获取漫画详情失败');
       setState(() {
-        _error = error.toString().replaceFirst('Exception: ', '');
+        _remoteError = parsed;
+        _error = parsed.message;
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _runRemoteCommand() async {
+    final command = _remoteError?.command;
+    if (command == kConfirmAdultCommand) {
+      await _load(confirmAdult: true);
     }
   }
 
@@ -78,7 +99,7 @@ class _MangaDetailScreenState extends State<MangaDetailScreen> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+        SnackBar(content: Text(sanitizeRemoteError(error, fallback: '书架操作失败'))),
       );
     }
   }
@@ -114,10 +135,8 @@ class _MangaDetailScreenState extends State<MangaDetailScreen> {
           ),
         ],
       ),
-      body: _error != null && detail == null
-          ? Center(child: Text(_error!))
-          : CustomScrollView(
-              slivers: [
+      body: CustomScrollView(
+        slivers: [
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                   sliver: SliverToBoxAdapter(
@@ -153,9 +172,30 @@ class _MangaDetailScreenState extends State<MangaDetailScreen> {
                     hasScrollBody: false,
                     child: Padding(
                       padding: const EdgeInsets.all(24),
-                      child: Text(
-                        _error ?? '暂无章节',
-                        style: FontUtils.poppins(color: muted),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            _error ?? '暂无章节',
+                            textAlign: TextAlign.center,
+                            style: FontUtils.poppins(color: muted),
+                          ),
+                          if (_remoteError?.hasCommand == true) ...[
+                            const SizedBox(height: 16),
+                            FilledButton(
+                              onPressed: _runRemoteCommand,
+                              child: Text(_remoteError!.commandLabel ?? kConfirmAdultLabel),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                          if (_error != null) ...[
+                            if (_remoteError?.hasCommand != true) const SizedBox(height: 16),
+                            TextButton(
+                              onPressed: _load,
+                              child: const Text('重试'),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   )
@@ -177,8 +217,8 @@ class _MangaDetailScreenState extends State<MangaDetailScreen> {
                       ),
                     ),
                   ),
-              ],
-            ),
+        ],
+      ),
     );
   }
 }

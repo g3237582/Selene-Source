@@ -40,6 +40,86 @@ void main() {
     });
   });
 
+  group('resolveHasMore', () {
+    test('trusts an explicit next-page flag', () {
+      expect(
+        resolveHasMore(
+          data: const {'hasNextPage': true},
+          itemCount: 3,
+          pageSize: 20,
+        ),
+        isTrue,
+      );
+    });
+
+    test('stops when the API says there is no next page', () {
+      expect(
+        resolveHasMore(
+          data: const {'hasNextPage': false},
+          itemCount: 20,
+          pageSize: 20,
+        ),
+        isFalse,
+      );
+    });
+
+    test('infers another page when the flag is missing and the page is full', () {
+      expect(
+        resolveHasMore(
+          data: const {},
+          itemCount: 10,
+          pageSize: 10,
+        ),
+        isTrue,
+      );
+    });
+  });
+
+  group('remotePageCount', () {
+    test('exposes a following page while more results exist', () {
+      expect(remotePageCount(page: 1, hasMore: true), 2);
+      expect(remotePageCount(page: 3, hasMore: true), 4);
+    });
+
+    test('stays on the current page when the catalog is exhausted', () {
+      expect(remotePageCount(page: 1, hasMore: false), 1);
+      expect(remotePageCount(page: 4, hasMore: false), 4);
+    });
+  });
+
+  group('displayPageCount', () {
+    test('splits a remote batch into 24-item pages', () {
+      expect(
+        displayPageCount(
+          loadedCount: 70,
+          pageSize: 24,
+          remoteHasMore: false,
+        ),
+        3,
+      );
+    });
+
+    test('keeps a following page while the remote catalog has more', () {
+      expect(
+        displayPageCount(
+          loadedCount: 70,
+          pageSize: 24,
+          remoteHasMore: true,
+        ),
+        4,
+      );
+    });
+  });
+
+  group('remoteSummaryText', () {
+    test('shows this page count with the current page index', () {
+      expect(
+        remoteSummaryText(pageItemCount: 12, page: 1, pageCount: 2),
+        '本页12条  1/2',
+      );
+    });
+  });
+
   group('shouldLoadMore', () {
     test('fires when the user is near the bottom', () {
       expect(

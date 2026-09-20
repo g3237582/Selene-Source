@@ -1,6 +1,7 @@
 import '../models/manga.dart';
 import '../utils/json_records.dart';
 import '../utils/paged_list.dart';
+import '../utils/remote_error.dart';
 import 'api_service.dart';
 
 class MangaService {
@@ -42,7 +43,10 @@ class MangaService {
         .toList();
     return PagedResult(
       items: results,
-      hasMore: inferHasMore(itemCount: results.length, pageSize: 20),
+      hasMore: resolveHasMore(
+        data: response.data!,
+        itemCount: results.length,
+      ),
     );
   }
 
@@ -69,7 +73,10 @@ class MangaService {
         .toList();
     return PagedResult(
       items: mangas,
-      hasMore: response.data!['hasNextPage'] == true,
+      hasMore: resolveHasMore(
+        data: response.data!,
+        itemCount: mangas.length,
+      ),
     );
   }
 
@@ -79,6 +86,7 @@ class MangaService {
     String? title,
     String? cover,
     String? sourceName,
+    bool confirmAdult = false,
   }) async {
     final response = await ApiService.get<Map<String, dynamic>>(
       '/api/manga/detail',
@@ -88,11 +96,55 @@ class MangaService {
         if (title != null && title.isNotEmpty) 'title': title,
         if (cover != null && cover.isNotEmpty) 'cover': cover,
         if (sourceName != null && sourceName.isNotEmpty) 'sourceName': sourceName,
+        if (confirmAdult) 'confirmAdult': '1',
       },
       fromJson: (data) => Map<String, dynamic>.from(data as Map),
     );
+    return _detailFromResponse(response);
+  }
+
+  static Future<MangaDetail> sendCommand({
+    required String command,
+    required String mangaId,
+    required String sourceId,
+    String? title,
+    String? cover,
+    String? sourceName,
+  }) async {
+    if (command == kConfirmAdultCommand) {
+      return getDetail(
+        mangaId: mangaId,
+        sourceId: sourceId,
+        title: title,
+        cover: cover,
+        sourceName: sourceName,
+        confirmAdult: true,
+      );
+    }
+    final response = await ApiService.post<Map<String, dynamic>>(
+      '/api/manga/command',
+      body: {
+        'command': command,
+        'mangaId': mangaId,
+        'sourceId': sourceId,
+        if (title != null && title.isNotEmpty) 'title': title,
+        if (cover != null && cover.isNotEmpty) 'cover': cover,
+        if (sourceName != null && sourceName.isNotEmpty) 'sourceName': sourceName,
+      },
+      fromJson: (data) => Map<String, dynamic>.from(data as Map),
+    );
+    return _detailFromResponse(response);
+  }
+
+  static MangaDetail _detailFromResponse(ApiResponse<Map<String, dynamic>> response) {
     if (!response.success || response.data == null) {
-      throw Exception(response.message ?? '获取漫画详情失败');
+      throw MangaRemoteException(
+        parseRemoteError(
+          response.message ?? '',
+          fallback: '获取漫画详情失败',
+          action: response.action,
+        ),
+      );
     }
     return MangaDetail.fromJson(response.data!);
   }
@@ -104,7 +156,12 @@ class MangaService {
       fromJson: (data) => Map<String, dynamic>.from(data as Map),
     );
     if (!response.success || response.data == null) {
-      throw Exception(response.message ?? '获取章节图片失败');
+      throw Exception(
+        sanitizeRemoteError(
+          response.message ?? '',
+          fallback: '获取章节图片失败',
+        ),
+      );
     }
     return (response.data!['pages'] as List? ?? [])
         .map((item) => item.toString())

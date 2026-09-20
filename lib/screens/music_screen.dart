@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../models/music_discovery.dart';
 import '../models/music_track.dart';
 import '../services/music_player_service.dart';
 import '../services/music_service.dart';
 import '../services/theme_service.dart';
 import '../utils/font_utils.dart';
 import '../utils/paged_list.dart';
-import '../widgets/authenticated_image.dart';
+import '../widgets/music_home_widgets.dart';
+import '../widgets/music_track_tile.dart';
+import '../widgets/search_pagination_bar.dart';
 import 'music_player_screen.dart';
+import 'music_playlist_screen.dart';
 
 class MusicScreen extends StatefulWidget {
   const MusicScreen({super.key});
@@ -19,45 +23,107 @@ class MusicScreen extends StatefulWidget {
 
 class _MusicScreenState extends State<MusicScreen> {
   final TextEditingController _searchController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
   String _source = 'wy';
-  PagedListState<MusicTrack> _page = const PagedListState();
-  bool _loading = false;
+  int _homeTab = 0;
+  PagedListState<MusicTrack> _searchPage = const PagedListState();
+  List<MusicBoard> _boards = [];
+  List<MusicPlaylist> _playlists = [];
+  List<MusicTag> _hotTags = [];
+  String _sortId = 'hot';
+  String _tagId = '';
+  int _playlistPage = 1;
+  int _playlistPageCount = 1;
+  bool _searching = false;
+  bool _loadingHome = true;
   bool _loadingMore = false;
   String? _error;
+
+  bool get _inSearch => _searchController.text.trim().isNotEmpty;
 
   @override
   void initState() {
     super.initState();
-    _scrollController.addListener(_onScroll);
+    _loadHome();
   }
 
   @override
   void dispose() {
-    _scrollController.removeListener(_onScroll);
-    _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
   }
 
-  void _onScroll() {
-    handlePagedScroll(
-      _scrollController,
-      hasMore: _page.hasMore,
-      isBusy: _loading || _loadingMore,
-      onLoadMore: () => _search(reset: false),
-    );
+  Future<void> _loadHome() async {
+    setState(() {
+      _loadingHome = true;
+      _error = null;
+    });
+    try {
+      if (_homeTab == 0) {
+        final boards = await MusicService.getBoards(source: _source);
+        if (!mounted) return;
+        setState(() {
+          _boards = boards;
+          _loadingHome = false;
+        });
+        return;
+      }
+      final page = await MusicService.getSongLists(
+        source: _source,
+        tagId: _tagId,
+        sortId: _sortId,
+        page: _playlistPage,
+      );
+      List<MusicTag> tags = _hotTags;
+      try {
+        tags = await MusicService.getSongListTags(source: _source);
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() {
+        _playlists = page.items;
+        _hotTags = tags;
+        _playlistPageCount = remotePageCount(page: page.page, hasMore: page.hasMore);
+        _playlistPage = page.page;
+        _loadingHome = false;
+      });
+    } catch (error) {
+      if (_homeTab == 1) {
+        try {
+          final boards = await MusicService.getBoards(source: _source);
+          if (!mounted) return;
+          if (boards.isNotEmpty) {
+            setState(() {
+              _homeTab = 0;
+              _boards = boards;
+              _loadingHome = false;
+              _error = null;
+            });
+            return;
+          }
+        } catch (_) {}
+      }
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString().replaceFirst('Exception: ', '');
+        _loadingHome = false;
+      });
+    }
   }
 
   Future<void> _search({required bool reset}) async {
     final query = _searchController.text.trim();
-    if (query.isEmpty) return;
-    if (!reset && (_loading || _loadingMore || !_page.hasMore)) return;
+    if (query.isEmpty) {
+      setState(() {
+        _searchPage = const PagedListState();
+        _error = null;
+      });
+      return;
+    }
+    if (!reset && (_searching || _loadingMore || !_searchPage.hasMore)) return;
 
     setState(() {
       if (reset) {
-        _loading = true;
-        _page = const PagedListState();
+        _searching = true;
+        _searchPage = const PagedListState();
         _error = null;
       } else {
         _loadingMore = true;
@@ -68,32 +134,59 @@ class _MusicScreenState extends State<MusicScreen> {
       final result = await MusicService.search(
         query: query,
         source: _source,
-        page: reset ? 1 : _page.nextPage,
+        page: reset ? 1 : _searchPage.nextPage,
       );
       if (!mounted) return;
       setState(() {
-        _page = (reset ? const PagedListState<MusicTrack>() : _page).append(result);
-        _loading = false;
+        _searchPage =
+            (reset ? const PagedListState<MusicTrack>() : _searchPage).append(result);
+        _searching = false;
         _loadingMore = false;
       });
-      if (reset) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          _onScroll();
-        });
-      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _error = error.toString().replaceFirst('Exception: ', '');
-        _loading = false;
+        _searching = false;
         _loadingMore = false;
       });
     }
   }
 
-  Future<void> _play(MusicTrack track) async {
-    await MusicPlayerService.instance.playTrack(track, playlist: _page.items);
+  void _changeSource(String source) {
+    setState(() => _source = source);
+    if (_inSearch) {
+      _search(reset: true);
+    } else {
+      _playlistPage = 1;
+      _loadHome();
+    }
+  }
+
+  void _openBoard(MusicBoard board) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MusicPlaylistScreen(
+          title: board.name,
+          source: board.source.isNotEmpty ? board.source : _source,
+          id: board.id,
+          kind: MusicPlaylistKind.board,
+        ),
+      ),
+    );
+  }
+
+  void _openPlaylist(MusicPlaylist playlist) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MusicPlaylistScreen(
+          title: playlist.name,
+          source: playlist.source.isNotEmpty ? playlist.source : _source,
+          id: playlist.id,
+          kind: MusicPlaylistKind.songlist,
+        ),
+      ),
+    );
   }
 
   @override
@@ -117,6 +210,14 @@ class _MusicScreenState extends State<MusicScreen> {
                 controller: _searchController,
                 textInputAction: TextInputAction.search,
                 onSubmitted: (_) => _search(reset: true),
+                onChanged: (value) {
+                  if (value.trim().isEmpty) {
+                    setState(() {
+                      _searchPage = const PagedListState();
+                      _error = null;
+                    });
+                  }
+                },
                 decoration: InputDecoration(
                   hintText: '搜索歌曲、歌手',
                   hintStyle: FontUtils.poppins(color: muted, fontSize: 14),
@@ -149,12 +250,7 @@ class _MusicScreenState extends State<MusicScreen> {
                       child: ChoiceChip(
                         label: Text(entry.value),
                         selected: _source == entry.key,
-                        onSelected: (_) {
-                          setState(() => _source = entry.key);
-                          if (_searchController.text.trim().isNotEmpty) {
-                            _search(reset: true);
-                          }
-                        },
+                        onSelected: (_) => _changeSource(entry.key),
                         selectedColor: const Color(0xFF27ae60),
                         labelStyle: FontUtils.poppins(
                           fontSize: 12,
@@ -165,6 +261,18 @@ class _MusicScreenState extends State<MusicScreen> {
                 ],
               ),
             ),
+            if (!_inSearch)
+              MusicHomeTabBar(
+                tab: _homeTab,
+                onChanged: (tab) {
+                  setState(() {
+                    _homeTab = tab;
+                    _playlistPage = 1;
+                  });
+                  _loadHome();
+                },
+              ),
+            if (!_inSearch && _homeTab == 1) _buildSongListFilters(textColor),
             if (player.errorMessage.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -173,78 +281,178 @@ class _MusicScreenState extends State<MusicScreen> {
                   style: FontUtils.poppins(color: const Color(0xFFe74c3c), fontSize: 12),
                 ),
               ),
-            Expanded(child: _buildList(player, textColor, muted)),
+            Expanded(child: _buildBody(player, muted)),
           ],
         );
       },
     );
   }
 
-  Widget _buildList(MusicPlayerService player, Color textColor, Color muted) {
-    if (_loading && _page.items.isEmpty) {
+  Widget _buildSongListFilters(Color textColor) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              for (final item in const [
+                ('hot', '最热'),
+                ('new', '最新'),
+              ])
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(item.$2),
+                    selected: _sortId == item.$1,
+                    onSelected: (_) {
+                      setState(() {
+                        _sortId = item.$1;
+                        _playlistPage = 1;
+                      });
+                      _loadHome();
+                    },
+                    selectedColor: const Color(0xFF27ae60),
+                    labelStyle: FontUtils.poppins(
+                      fontSize: 12,
+                      color: _sortId == item.$1 ? Colors.white : textColor,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          if (_hotTags.isNotEmpty)
+            SizedBox(
+              height: 40,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _hotTags.length + 1,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  if (index == 0) {
+                    return ChoiceChip(
+                      label: const Text('全部'),
+                      selected: _tagId.isEmpty,
+                      onSelected: (_) {
+                        setState(() {
+                          _tagId = '';
+                          _playlistPage = 1;
+                        });
+                        _loadHome();
+                      },
+                      selectedColor: const Color(0xFF27ae60),
+                      labelStyle: FontUtils.poppins(
+                        fontSize: 12,
+                        color: _tagId.isEmpty ? Colors.white : textColor,
+                      ),
+                    );
+                  }
+                  final tag = _hotTags[index - 1];
+                  final selected = _tagId == tag.name;
+                  return ChoiceChip(
+                    label: Text(tag.name),
+                    selected: selected,
+                    onSelected: (_) {
+                      setState(() {
+                        _tagId = tag.name;
+                        _playlistPage = 1;
+                      });
+                      _loadHome();
+                    },
+                    selectedColor: const Color(0xFF27ae60),
+                    labelStyle: FontUtils.poppins(
+                      fontSize: 12,
+                      color: selected ? Colors.white : textColor,
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody(MusicPlayerService player, Color muted) {
+    if (_inSearch) {
+      return _buildSearch(player, muted);
+    }
+    if (_loadingHome) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_error != null && _page.items.isEmpty) {
+    if (_error != null) {
       return Center(child: Text(_error!, style: FontUtils.poppins(color: muted)));
     }
-    if (_page.items.isEmpty) {
+    if (_homeTab == 0) {
+      return MusicBoardList(boards: _boards, onTap: _openBoard);
+    }
+    return Column(
+      children: [
+        Expanded(
+          child: MusicPlaylistGrid(items: _playlists, onTap: _openPlaylist),
+        ),
+        if (_playlists.isNotEmpty)
+          SearchPaginationBar(
+            totalItems: _playlists.length,
+            page: _playlistPage,
+            pageCount: _playlistPageCount,
+            summary: remoteSummaryText(
+              pageItemCount: _playlists.length,
+              page: _playlistPage,
+              pageCount: _playlistPageCount,
+            ),
+            onPageChanged: (next) {
+              setState(() => _playlistPage = next);
+              _loadHome();
+            },
+          ),
+      ],
+    );
+  }
+
+  Widget _buildSearch(MusicPlayerService player, Color muted) {
+    if (_searching && _searchPage.items.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null && _searchPage.items.isEmpty) {
+      return Center(child: Text(_error!, style: FontUtils.poppins(color: muted)));
+    }
+    if (_searchPage.items.isEmpty) {
       return Center(
-        child: Text('搜索歌曲后即可播放', style: FontUtils.poppins(color: muted)),
+        child: Text('未找到相关歌曲', style: FontUtils.poppins(color: muted)),
       );
     }
     return ListView.builder(
-      controller: _scrollController,
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
-      itemCount: _page.items.length + (_loadingMore ? 1 : 0),
+      itemCount: _searchPage.items.length + (_loadingMore ? 1 : 0),
       itemBuilder: (context, index) {
-        if (index >= _page.items.length) {
+        if (index >= _searchPage.items.length) {
           return const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
             child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
           );
         }
-        final track = _page.items[index];
+        if (index == _searchPage.items.length - 1 &&
+            _searchPage.hasMore &&
+            !_loadingMore &&
+            !_searching) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              _search(reset: false);
+            }
+          });
+        }
+        final track = _searchPage.items[index];
         final playing = player.current?.songId == track.songId;
-        return ListTile(
-          leading: SizedBox(
-            width: 48,
-            height: 48,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: track.cover.isEmpty
-                  ? const ColoredBox(
-                      color: Color(0xFF2c3e50),
-                      child: Icon(Icons.music_note, color: Colors.white70),
-                    )
-                  : AuthenticatedImage(url: track.cover),
-            ),
+        return MusicTrackTile(
+          track: track,
+          playing: playing,
+          paused: playing && !player.playing,
+          onTap: () => MusicPlayerService.instance.playTrack(
+            track,
+            playlist: _searchPage.items,
           ),
-          title: Text(
-            track.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: FontUtils.poppins(
-              fontWeight: playing ? FontWeight.w600 : FontWeight.w400,
-              color: playing ? const Color(0xFF27ae60) : textColor,
-            ),
-          ),
-          subtitle: Text(
-            [
-              track.artist,
-              track.album,
-              musicSourceLabels[track.source] ?? track.source,
-            ].where((item) => item.isNotEmpty).join(' · '),
-            maxLines: 1,
-          ),
-          trailing: IconButton(
-            icon: Icon(
-              playing && player.playing ? Icons.pause_circle : Icons.play_circle,
-              color: const Color(0xFF27ae60),
-            ),
-            onPressed: () => _play(track),
-          ),
-          onTap: () => _play(track),
-          onLongPress: () {
+          onOpenPlayer: () {
             Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const MusicPlayerScreen()),
             );

@@ -8,6 +8,7 @@ class SearchPaginationBar extends StatelessWidget {
   final int totalItems;
   final int page;
   final int pageCount;
+  final String? summary;
   final ValueChanged<int> onPageChanged;
 
   const SearchPaginationBar({
@@ -16,6 +17,7 @@ class SearchPaginationBar extends StatelessWidget {
     required this.page,
     required this.pageCount,
     required this.onPageChanged,
+    this.summary,
   });
 
   @override
@@ -33,11 +35,12 @@ class SearchPaginationBar extends StatelessWidget {
         children: [
           Expanded(
             child: Text(
-              SearchListPaging.summaryText(
-                totalItems: totalItems,
-                page: page,
-                pageCount: pageCount,
-              ),
+              summary ??
+                  SearchListPaging.summaryText(
+                    totalItems: totalItems,
+                    page: page,
+                    pageCount: pageCount,
+                  ),
               style: FontUtils.poppins(
                 fontSize: 13,
                 color: Theme.of(context).textTheme.bodySmall?.color,

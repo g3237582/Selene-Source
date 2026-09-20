@@ -4,9 +4,11 @@ import 'package:provider/provider.dart';
 import '../models/manga.dart';
 import '../services/manga_service.dart';
 import '../services/theme_service.dart';
+import '../search/search_list_paging.dart';
 import '../utils/font_utils.dart';
 import '../utils/paged_list.dart';
 import '../widgets/authenticated_image.dart';
+import '../widgets/search_pagination_bar.dart';
 import 'manga_detail_screen.dart';
 
 class MangaScreen extends StatefulWidget {
@@ -18,39 +20,29 @@ class MangaScreen extends StatefulWidget {
 
 class _MangaScreenState extends State<MangaScreen> {
   final TextEditingController _searchController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
   List<MangaSource> _sources = [];
   String? _sourceId;
-  PagedListState<MangaItem> _page = const PagedListState();
+  List<MangaItem> _loadedItems = [];
+  List<MangaItem> _items = [];
+  int _page = 1;
+  int _remoteNextPage = 1;
+  bool _remoteHasMore = true;
   List<MangaShelfItem> _shelf = [];
   List<MangaReadRecord> _history = [];
   bool _loading = true;
-  bool _loadingMore = false;
   String? _error;
   int _tab = 0;
 
   @override
   void initState() {
     super.initState();
-    _scrollController.addListener(_onScroll);
     _bootstrap();
   }
 
   @override
   void dispose() {
-    _scrollController.removeListener(_onScroll);
-    _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
-  }
-
-  void _onScroll() {
-    handlePagedScroll(
-      _scrollController,
-      hasMore: _page.hasMore,
-      isBusy: _loading || _loadingMore,
-      onLoadMore: () => _loadDiscover(reset: false),
-    );
   }
 
   Future<void> _bootstrap() async {
@@ -63,7 +55,14 @@ class _MangaScreenState extends State<MangaScreen> {
       _loadLibrary(),
     ]);
     if (!mounted) return;
-    await _loadDiscover(reset: true);
+    await _reloadDiscover();
+  }
+
+  Future<void> _reloadDiscover() {
+    _loadedItems = [];
+    _remoteNextPage = 1;
+    _remoteHasMore = true;
+    return _loadDiscover(page: 1);
   }
 
   Future<void> _loadSources() async {
@@ -82,59 +81,77 @@ class _MangaScreenState extends State<MangaScreen> {
     }
   }
 
-  Future<void> _loadDiscover({required bool reset}) async {
-    if (!reset && (_loading || _loadingMore || !_page.hasMore)) return;
+  Future<void> _loadDiscover({required int page}) async {
+    if (_loading && _items.isNotEmpty && page == _page) return;
     final query = _searchController.text.trim();
     if (query.isEmpty && _sourceId == null) {
       setState(() {
         _loading = false;
-        _page = const PagedListState();
+        _loadedItems = [];
+        _items = [];
+        _page = 1;
+        _remoteNextPage = 1;
+        _remoteHasMore = false;
       });
       return;
     }
 
+    final needed = page * SearchListPaging.pageSize;
+    if (_loadedItems.length >= needed || !_remoteHasMore) {
+      _applyDiscoverPage(page);
+      return;
+    }
+
     setState(() {
-      if (reset) {
-        _loading = true;
-        _page = const PagedListState();
-        _error = null;
-      } else {
-        _loadingMore = true;
-      }
+      _loading = true;
+      _error = null;
     });
 
     try {
-      final result = query.isEmpty
-          ? await MangaService.recommend(
-              sourceId: _sourceId!,
-              page: reset ? 1 : _page.nextPage,
-            )
-          : await MangaService.search(
-              query: query,
-              sourceId: _sourceId,
-              page: reset ? 1 : _page.nextPage,
-            );
-      if (!mounted) return;
-      setState(() {
-        _page = (reset ? const PagedListState<MangaItem>() : _page).append(result);
-        _loading = false;
-        _loadingMore = false;
-        _error = null;
-      });
-      if (reset) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          _onScroll();
-        });
+      while (_loadedItems.length < needed && _remoteHasMore) {
+        final result = query.isEmpty
+            ? await MangaService.recommend(
+                sourceId: _sourceId!,
+                page: _remoteNextPage,
+              )
+            : await MangaService.search(
+                query: query,
+                sourceId: _sourceId,
+                page: _remoteNextPage,
+              );
+        if (!mounted) return;
+        if (result.items.isEmpty) {
+          _remoteHasMore = false;
+          break;
+        }
+        _loadedItems = [..._loadedItems, ...result.items];
+        _remoteNextPage += 1;
+        _remoteHasMore = result.hasMore;
       }
+      if (!mounted) return;
+      _applyDiscoverPage(page);
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _error = error.toString().replaceFirst('Exception: ', '');
         _loading = false;
-        _loadingMore = false;
       });
     }
+  }
+
+  void _applyDiscoverPage(int page) {
+    final pageCount = displayPageCount(
+      loadedCount: _loadedItems.length,
+      pageSize: SearchListPaging.pageSize,
+      remoteHasMore: _remoteHasMore,
+    );
+    final current = SearchListPaging.clampPage(page, pageCount);
+    setState(() {
+      _items = SearchListPaging.pageOf(_loadedItems, current);
+      _page = current;
+      _loading = false;
+      _error = null;
+    });
   }
 
   Future<void> _loadLibrary() async {
@@ -184,14 +201,14 @@ class _MangaScreenState extends State<MangaScreen> {
             child: TextField(
               controller: _searchController,
               textInputAction: TextInputAction.search,
-              onSubmitted: (_) => _loadDiscover(reset: true),
+              onSubmitted: (_) => _reloadDiscover(),
               decoration: InputDecoration(
                 hintText: '搜索漫画',
                 hintStyle: FontUtils.poppins(color: muted, fontSize: 14),
                 prefixIcon: Icon(Icons.search, color: muted),
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.arrow_forward, color: Color(0xFF27ae60)),
-                  onPressed: () => _loadDiscover(reset: true),
+                  onPressed: () => _reloadDiscover(),
                 ),
                 filled: true,
                 fillColor: theme.isDarkMode ? const Color(0xFF1e1e1e) : Colors.white,
@@ -219,7 +236,7 @@ class _MangaScreenState extends State<MangaScreen> {
                     selected: selected,
                     onSelected: (_) {
                       setState(() => _sourceId = source.id);
-                      _loadDiscover(reset: true);
+                      _reloadDiscover();
                     },
                     selectedColor: const Color(0xFF27ae60),
                     labelStyle: FontUtils.poppins(
@@ -241,10 +258,10 @@ class _MangaScreenState extends State<MangaScreen> {
   }
 
   Widget _buildDiscover(Color muted) {
-    if (_loading && _page.items.isEmpty) {
+    if (_loading && _items.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_error != null && _page.items.isEmpty) {
+    if (_error != null && _items.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -252,11 +269,34 @@ class _MangaScreenState extends State<MangaScreen> {
         ),
       );
     }
-    return _MangaGrid(
-      items: _page.items,
-      controller: _scrollController,
-      loadingMore: _loadingMore,
-      onTap: _openManga,
+    final pageCount = displayPageCount(
+      loadedCount: _loadedItems.length,
+      pageSize: SearchListPaging.pageSize,
+      remoteHasMore: _remoteHasMore,
+    );
+    return Column(
+      children: [
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _MangaGrid(
+                  items: _items,
+                  onTap: _openManga,
+                ),
+        ),
+        if (_items.isNotEmpty)
+          SearchPaginationBar(
+            totalItems: _items.length,
+            page: _page,
+            pageCount: pageCount,
+            summary: remoteSummaryText(
+              pageItemCount: _items.length,
+              page: _page,
+              pageCount: pageCount,
+            ),
+            onPageChanged: (next) => _loadDiscover(page: next),
+          ),
+      ],
     );
   }
 }
@@ -288,14 +328,10 @@ class _Chip extends StatelessWidget {
 
 class _MangaGrid extends StatelessWidget {
   final List<MangaItem> items;
-  final ScrollController controller;
-  final bool loadingMore;
   final ValueChanged<MangaItem> onTap;
 
   const _MangaGrid({
     required this.items,
-    required this.controller,
-    required this.loadingMore,
     required this.onTap,
   });
 
@@ -307,7 +343,6 @@ class _MangaGrid extends StatelessWidget {
       );
     }
     return GridView.builder(
-      controller: controller,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
@@ -315,11 +350,8 @@ class _MangaGrid extends StatelessWidget {
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
       ),
-      itemCount: items.length + (loadingMore ? 1 : 0),
+      itemCount: items.length,
       itemBuilder: (context, index) {
-        if (index >= items.length) {
-          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
-        }
         final item = items[index];
         return GestureDetector(
           onTap: () => onTap(item),

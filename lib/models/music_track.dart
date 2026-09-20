@@ -27,14 +27,14 @@ class MusicTrack {
 
   factory MusicTrack.fromJson(Map<String, dynamic> json) {
     return MusicTrack(
-      songId: json['songId']?.toString() ?? '',
+      songId: (json['songId'] ?? json['id'] ?? '').toString(),
       source: json['source']?.toString() ?? 'wy',
-      songmid: json['songmid']?.toString() ?? '',
-      name: json['name']?.toString() ?? '',
-      artist: json['artist']?.toString() ?? '',
-      album: json['album']?.toString() ?? '',
-      cover: json['cover']?.toString() ?? '',
-      durationText: json['durationText']?.toString() ?? '',
+      songmid: (json['songmid'] ?? json['mid'] ?? '').toString(),
+      name: (json['name'] ?? json['title'] ?? '').toString(),
+      artist: (json['artist'] ?? json['singer'] ?? '').toString(),
+      album: (json['album'] ?? json['albumName'] ?? '').toString(),
+      cover: (json['cover'] ?? json['pic'] ?? json['img'] ?? '').toString(),
+      durationText: (json['durationText'] ?? json['interval'] ?? '').toString(),
       hash: json['hash']?.toString() ?? '',
       copyrightId: json['copyrightId']?.toString() ?? '',
       albumId: json['albumId']?.toString() ?? '',

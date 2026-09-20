@@ -41,6 +41,49 @@ bool inferHasMore({required int itemCount, required int pageSize}) {
   return pageSize > 0 && itemCount >= pageSize;
 }
 
+bool resolveHasMore({
+  required Map<String, dynamic> data,
+  required int itemCount,
+  int pageSize = 10,
+}) {
+  final explicit = data['hasNextPage'] ?? data['hasMore'];
+  if (explicit == true) {
+    return true;
+  }
+  if (explicit == false) {
+    return false;
+  }
+  return inferHasMore(itemCount: itemCount, pageSize: pageSize);
+}
+
+int displayPageCount({
+  required int loadedCount,
+  required int pageSize,
+  required bool remoteHasMore,
+}) {
+  if (pageSize <= 0 || loadedCount <= 0) {
+    return remoteHasMore ? 1 : 0;
+  }
+  final filled = (loadedCount + pageSize - 1) ~/ pageSize;
+  return remoteHasMore ? filled + 1 : filled;
+}
+
+int remotePageCount({required int page, required bool hasMore}) {
+  final current = page < 1 ? 1 : page;
+  return hasMore ? current + 1 : current;
+}
+
+String remoteSummaryText({
+  required int pageItemCount,
+  required int page,
+  required int pageCount,
+}) {
+  if (pageItemCount <= 0) {
+    return '共0条';
+  }
+  return '本页$pageItemCount条  $page/$pageCount';
+}
+
 bool shouldLoadMore({
   required double pixels,
   required double maxScrollExtent,

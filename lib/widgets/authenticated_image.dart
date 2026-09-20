@@ -8,6 +8,7 @@ import '../services/user_data_service.dart';
 class AuthenticatedImage extends StatefulWidget {
   final String url;
   final BoxFit fit;
+  final Alignment alignment;
   final double? width;
   final double? height;
 
@@ -15,6 +16,7 @@ class AuthenticatedImage extends StatefulWidget {
     super.key,
     required this.url,
     this.fit = BoxFit.cover,
+    this.alignment = Alignment.center,
     this.width,
     this.height,
   });
@@ -26,6 +28,7 @@ class AuthenticatedImage extends StatefulWidget {
 class _AuthenticatedImageState extends State<AuthenticatedImage> {
   static final Map<String, Uint8List> _cache = {};
   static const int _maxCacheEntries = 48;
+  static const double _placeholderHeight = 240;
 
   Uint8List? _bytes;
   bool _loading = true;
@@ -72,13 +75,8 @@ class _AuthenticatedImageState extends State<AuthenticatedImage> {
 
     try {
       final resolved = await _resolve(url);
-      final cookies = await UserDataService.getCookies();
-      final response = await http.get(
-        resolved,
-        headers: {
-          if (cookies != null && cookies.isNotEmpty) 'Cookie': cookies,
-        },
-      );
+      final headers = await _headersFor(resolved);
+      final response = await http.get(resolved, headers: headers);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception('image ${response.statusCode}');
       }
@@ -96,6 +94,26 @@ class _AuthenticatedImageState extends State<AuthenticatedImage> {
         _failed = true;
       });
     }
+  }
+
+  Future<Map<String, String>> _headersFor(Uri resolved) async {
+    final headers = <String, String>{
+      'User-Agent':
+          'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/122.0.0.0 Mobile Safari/537.36',
+    };
+    final baseUrl = await UserDataService.getServerUrl();
+    if (baseUrl == null || baseUrl.isEmpty) {
+      return headers;
+    }
+    final baseHost = Uri.tryParse(baseUrl)?.host;
+    if (baseHost == null || baseHost.isEmpty || resolved.host != baseHost) {
+      return headers;
+    }
+    final cookies = await UserDataService.getCookies();
+    if (cookies != null && cookies.isNotEmpty) {
+      headers['Cookie'] = cookies;
+    }
+    return headers;
   }
 
   Future<Uri> _resolve(String pathOrUrl) async {
@@ -124,7 +142,7 @@ class _AuthenticatedImageState extends State<AuthenticatedImage> {
     if (_loading) {
       return SizedBox(
         width: widget.width,
-        height: widget.height,
+        height: widget.height ?? _placeholderHeight,
         child: const Center(
           child: SizedBox(
             width: 18,
@@ -137,7 +155,7 @@ class _AuthenticatedImageState extends State<AuthenticatedImage> {
     if (_failed || _bytes == null) {
       return SizedBox(
         width: widget.width,
-        height: widget.height,
+        height: widget.height ?? _placeholderHeight,
         child: const ColoredBox(
           color: Color(0xFF2c3e50),
           child: Icon(Icons.broken_image_outlined, color: Colors.white54),
@@ -149,6 +167,7 @@ class _AuthenticatedImageState extends State<AuthenticatedImage> {
       fit: widget.fit,
       width: widget.width,
       height: widget.height,
+      alignment: widget.alignment,
       gaplessPlayback: true,
     );
     if (widget.width == null && widget.height == null) {

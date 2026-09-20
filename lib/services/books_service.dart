@@ -1,4 +1,5 @@
 import '../models/book.dart';
+import '../utils/book_catalog.dart';
 import '../utils/json_records.dart';
 import '../utils/paged_list.dart';
 import 'api_service.dart';
@@ -46,7 +47,7 @@ class BooksService {
         .toList();
   }
 
-  static Future<PagedResult<BookItem>> catalog({
+  static Future<BookCatalog> catalog({
     required String sourceId,
     String href = '',
   }) async {
@@ -64,12 +65,18 @@ class BooksService {
     final entries = (response.data!['entries'] as List? ?? [])
         .whereType<Map>()
         .map((item) => BookItem.fromJson(Map<String, dynamic>.from(item)))
+        .where(isReadableBookItem)
+        .toList();
+    final navigation = (response.data!['navigation'] as List? ?? [])
+        .whereType<Map>()
+        .map((item) => BookNavLink.fromJson(Map<String, dynamic>.from(item)))
+        .where((item) => item.href.isNotEmpty && item.title.isNotEmpty && item.title != '目录')
         .toList();
     final nextHref = response.data!['nextHref']?.toString() ?? '';
-    return PagedResult(
-      items: entries,
-      hasMore: nextHref.isNotEmpty,
-      nextToken: nextHref,
+    return BookCatalog(
+      entries: entries,
+      navigation: navigation,
+      nextHref: nextHref,
     );
   }
 

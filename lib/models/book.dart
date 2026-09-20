@@ -51,6 +51,7 @@ class BookItem {
   });
 
   factory BookItem.fromJson(Map<String, dynamic> json) {
+    final acquisition = _firstAcquisition(json);
     return BookItem(
       id: json['id']?.toString() ?? json['bookId']?.toString() ?? '',
       sourceId: json['sourceId']?.toString() ?? '',
@@ -59,12 +60,68 @@ class BookItem {
       author: json['author']?.toString() ?? '',
       cover: json['cover']?.toString() ?? '',
       summary: json['summary']?.toString() ?? '',
-      detailHref: (json['detailHref'] ?? json['href'] ?? '').toString(),
-      format: json['format']?.toString() ?? 'chapters',
+      detailHref: (json['detailHref'] ?? json['href'] ?? acquisition.href)
+          .toString(),
+      format: json['format']?.toString().isNotEmpty == true
+          ? json['format'].toString()
+          : acquisition.format,
     );
   }
 
+  static ({String href, String format}) _firstAcquisition(
+    Map<String, dynamic> json,
+  ) {
+    final links = json['acquisitionLinks'];
+    if (links is! List) {
+      return (href: '', format: 'chapters');
+    }
+    for (final item in links.whereType<Map>()) {
+      final href = item['href']?.toString() ?? '';
+      if (href.isEmpty) continue;
+      final type = item['type']?.toString().toLowerCase() ?? '';
+      final format = type.contains('pdf')
+          ? 'pdf'
+          : type.contains('epub')
+          ? 'epub'
+          : 'chapters';
+      return (href: href, format: format);
+    }
+    return (href: '', format: 'chapters');
+  }
+
   String get shelfKey => '$sourceId+$id';
+}
+
+class BookNavLink {
+  final String title;
+  final String href;
+  final String rel;
+
+  const BookNavLink({
+    required this.title,
+    required this.href,
+    this.rel = '',
+  });
+
+  factory BookNavLink.fromJson(Map<String, dynamic> json) {
+    return BookNavLink(
+      title: json['title']?.toString() ?? '',
+      href: json['href']?.toString() ?? '',
+      rel: json['rel']?.toString() ?? '',
+    );
+  }
+}
+
+class BookCatalog {
+  final List<BookItem> entries;
+  final List<BookNavLink> navigation;
+  final String nextHref;
+
+  const BookCatalog({
+    this.entries = const [],
+    this.navigation = const [],
+    this.nextHref = '',
+  });
 }
 
 class BookChapter {

@@ -18,12 +18,14 @@ class ApiResponse<T> {
   final T? data;
   final String? message;
   final int? statusCode;
+  final Map<String, dynamic>? action;
 
   ApiResponse({
     required this.success,
     this.data,
     this.message,
     this.statusCode,
+    this.action,
   });
 
   factory ApiResponse.success(T data, {int? statusCode}) {
@@ -34,11 +36,16 @@ class ApiResponse<T> {
     );
   }
 
-  factory ApiResponse.error(String message, {int? statusCode}) {
+  factory ApiResponse.error(
+    String message, {
+    int? statusCode,
+    Map<String, dynamic>? action,
+  }) {
     return ApiResponse<T>(
       success: false,
       message: message,
       statusCode: statusCode,
+      action: action,
     );
   }
 }
@@ -131,6 +138,13 @@ class ApiService {
         final errorData = json.decode(response.body);
         errorMessage =
             errorData['message'] ?? errorData['error'] ?? errorMessage;
+        if (errorData['action'] is Map) {
+          return ApiResponse.error(
+            errorMessage.toString(),
+            statusCode: response.statusCode,
+            action: Map<String, dynamic>.from(errorData['action'] as Map),
+          );
+        }
       } catch (e) {
         // 如果解析失败，使用默认错误信息
         switch (response.statusCode) {

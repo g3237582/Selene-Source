@@ -68,6 +68,12 @@ class MusicPlayerService extends ChangeNotifier {
     }
   }
 
+  Future<void> playPlaylist(List<MusicTrack> tracks, {int index = 0}) async {
+    if (tracks.isEmpty) return;
+    final start = index < 0 || index >= tracks.length ? 0 : index;
+    await playTrack(tracks[start], playlist: tracks);
+  }
+
   Future<void> togglePlay() async {
     if (current == null) return;
     await player.playOrPause();
