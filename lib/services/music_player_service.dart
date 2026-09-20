@@ -10,6 +10,13 @@ class MusicPlayerService extends ChangeNotifier {
       playing = value;
       notifyListeners();
     });
+    player.stream.duration.listen((_) {
+      // Duration arrives after open. The MediaSession card needs it for
+      // a seek bar; do not wait for a later track/playing change.
+      if (current != null) {
+        notifyListeners();
+      }
+    });
     player.stream.completed.listen((completed) {
       if (completed) {
         playNext();
@@ -97,6 +104,7 @@ class MusicPlayerService extends ChangeNotifier {
 
   Future<void> seek(Duration position) async {
     await player.seek(position);
+    notifyListeners();
   }
 
   Future<void> stopAndClear() async {

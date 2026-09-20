@@ -23,12 +23,29 @@ class MusicMediaSessionController {
     required this.publisher,
   });
 
+  /// Lock-screen progress stays alive without flooding MediaSession.
+  static const positionTickInterval = Duration(seconds: 1);
+
   final MusicPlaybackCommands commands;
   final MusicSessionPublisher publisher;
+  DateTime? lastPublishAt;
 
-  Future<void> sync(MusicNowPlaying? snapshot) {
+  Future<void> sync(MusicNowPlaying? snapshot, {DateTime? now}) {
+    lastPublishAt = now ?? DateTime.now();
     if (snapshot == null) return publisher.clear();
     return publisher.publish(snapshot);
+  }
+
+  /// Republish PlaybackState on position ticks while playing so OEM
+  /// MediaStyle cards keep the session visible and the seek bar moves.
+  Future<void> syncPositionTick(MusicNowPlaying? snapshot, {DateTime? now}) {
+    now ??= DateTime.now();
+    if (snapshot == null || !snapshot.playing) return Future.value();
+    final last = lastPublishAt;
+    if (last != null && now.difference(last) < positionTickInterval) {
+      return Future.value();
+    }
+    return sync(snapshot, now: now);
   }
 
   Future<void> play() => commands.play();
