@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../music/music_now_playing.dart';
+import '../screens/music_player_screen.dart';
 import '../services/music_player_service.dart';
 import 'authenticated_image.dart';
 
@@ -30,30 +32,48 @@ class MusicDynamicIsland extends StatefulWidget {
     @visibleForTesting this.debugProgress,
     @visibleForTesting this.debugTitle,
     @visibleForTesting this.debugCoverUrl,
+    @visibleForTesting this.debugPlaying,
+    @visibleForTesting this.debugCanPlayPrevious,
+    @visibleForTesting this.debugCanPlayNext,
   });
 
   final bool debugForceVisible;
   final double? debugProgress;
   final String? debugTitle;
   final String? debugCoverUrl;
+  final bool? debugPlaying;
+  final bool? debugCanPlayPrevious;
+  final bool? debugCanPlayNext;
 
   @override
-  State<MusicDynamicIsland> createState() => _MusicDynamicIslandState();
+  State<MusicDynamicIsland> createState() => MusicDynamicIslandState();
 }
 
-class _MusicDynamicIslandState extends State<MusicDynamicIsland> {
+class MusicDynamicIslandState extends State<MusicDynamicIsland>
+    with SingleTickerProviderStateMixin {
   static const _accent = Color(0xFF27ae60);
   static const _islandColor = Color(0xFF1e1e1e);
   static const _strokeWidth = 2.0;
+  static const _expandDuration = Duration(milliseconds: 220);
+  static const _autoCollapseDuration = Duration(seconds: 4);
 
+  late final AnimationController _expandController;
   StreamSubscription<Duration>? _positionSubscription;
   StreamSubscription<Duration>? _durationSubscription;
+  Timer? _collapseTimer;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
+  bool _expanded = false;
+
+  bool get isExpanded => _expanded;
 
   @override
   void initState() {
     super.initState();
+    _expandController = AnimationController(
+      vsync: this,
+      duration: _expandDuration,
+    );
     if (widget.debugForceVisible) {
       return;
     }
@@ -72,9 +92,81 @@ class _MusicDynamicIslandState extends State<MusicDynamicIsland> {
 
   @override
   void dispose() {
+    _collapseTimer?.cancel();
     _positionSubscription?.cancel();
     _durationSubscription?.cancel();
+    _expandController.dispose();
     super.dispose();
+  }
+
+  void expand() {
+    if (_expanded) {
+      _restartCollapseTimer();
+      return;
+    }
+    setState(() => _expanded = true);
+    _expandController.forward();
+    _restartCollapseTimer();
+  }
+
+  void collapse() {
+    _collapseTimer?.cancel();
+    if (!_expanded) {
+      return;
+    }
+    setState(() => _expanded = false);
+    _expandController.reverse();
+  }
+
+  void _toggleExpanded() {
+    if (_expanded) {
+      collapse();
+    } else {
+      expand();
+    }
+  }
+
+  void _restartCollapseTimer() {
+    _collapseTimer?.cancel();
+    if (!_expanded) {
+      return;
+    }
+    _collapseTimer = Timer(_autoCollapseDuration, collapse);
+  }
+
+  void _openPlayer() {
+    if (widget.debugForceVisible) {
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const MusicPlayerScreen(),
+      ),
+    );
+  }
+
+  void _playPrevious() {
+    _restartCollapseTimer();
+    if (widget.debugForceVisible) {
+      return;
+    }
+    MusicPlayerService.instance.playPrevious();
+  }
+
+  void _togglePlay() {
+    _restartCollapseTimer();
+    if (widget.debugForceVisible) {
+      return;
+    }
+    MusicPlayerService.instance.togglePlay();
+  }
+
+  void _playNext() {
+    _restartCollapseTimer();
+    if (widget.debugForceVisible) {
+      return;
+    }
+    MusicPlayerService.instance.playNext();
   }
 
   @override
@@ -84,6 +176,9 @@ class _MusicDynamicIslandState extends State<MusicDynamicIsland> {
         progress: widget.debugProgress ?? 0.0,
         title: widget.debugTitle ?? '',
         coverUrl: widget.debugCoverUrl ?? '',
+        playing: widget.debugPlaying ?? false,
+        canPlayPrevious: widget.debugCanPlayPrevious ?? true,
+        canPlayNext: widget.debugCanPlayNext ?? true,
       );
     }
 
@@ -105,6 +200,15 @@ class _MusicDynamicIslandState extends State<MusicDynamicIsland> {
           ),
           title: track!.name,
           coverUrl: track.cover,
+          playing: player.playing,
+          canPlayPrevious: MusicNowPlaying.canSkipPreviousInQueue(
+            player.queue,
+            player.queueIndex,
+          ),
+          canPlayNext: MusicNowPlaying.canSkipNextInQueue(
+            player.queue,
+            player.queueIndex,
+          ),
         );
       },
     );
@@ -114,6 +218,9 @@ class _MusicDynamicIslandState extends State<MusicDynamicIsland> {
     required double progress,
     required String title,
     required String coverUrl,
+    required bool playing,
+    required bool canPlayPrevious,
+    required bool canPlayNext,
   }) {
     return Center(
       child: CustomPaint(
@@ -126,45 +233,115 @@ class _MusicDynamicIslandState extends State<MusicDynamicIsland> {
         ),
         child: Padding(
           padding: const EdgeInsets.all(_strokeWidth),
-          child: Container(
-            key: const Key('music_dynamic_island'),
-            height: 36,
-            padding: const EdgeInsets.fromLTRB(4, 4, 10, 4),
-            decoration: BoxDecoration(
-              color: _islandColor,
-              borderRadius: BorderRadius.circular(18),
-              boxShadow: const [
-                BoxShadow(
-                  color: Colors.black26,
-                  blurRadius: 8,
-                  offset: Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _buildCover(coverUrl),
-                if (title.trim().isNotEmpty) ...[
-                  const SizedBox(width: 6),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 72),
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
+          child: AnimatedBuilder(
+            animation: _expandController,
+            builder: (context, _) {
+              return _buildCapsule(
+                title: title,
+                coverUrl: coverUrl,
+                playing: playing,
+                canPlayPrevious: canPlayPrevious,
+                canPlayNext: canPlayNext,
+              );
+            },
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildCapsule({
+    required String title,
+    required String coverUrl,
+    required bool playing,
+    required bool canPlayPrevious,
+    required bool canPlayNext,
+  }) {
+    return GestureDetector(
+      key: const Key('music_dynamic_island'),
+      onTap: _toggleExpanded,
+      child: AnimatedContainer(
+        duration: _expandDuration,
+        curve: Curves.easeOutCubic,
+        height: 36,
+        padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
+        decoration: BoxDecoration(
+          color: _islandColor,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black26,
+              blurRadius: 8,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            GestureDetector(
+              onTap: _openPlayer,
+              child: _buildCover(coverUrl),
+            ),
+            if (title.trim().isNotEmpty) ...[
+              const SizedBox(width: 6),
+              GestureDetector(
+                onTap: _openPlayer,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: _expanded ? 96 : 72),
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            if (!_expanded) const SizedBox(width: 36),
+            if (_expanded) ...[
+              _buildTransportButton(
+                key: const Key('music_island_prev'),
+                icon: Icons.skip_previous,
+                onPressed: canPlayPrevious ? _playPrevious : null,
+              ),
+              _buildTransportButton(
+                key: const Key('music_island_play'),
+                icon: playing ? Icons.pause : Icons.play_arrow,
+                onPressed: _togglePlay,
+              ),
+              _buildTransportButton(
+                key: const Key('music_island_next'),
+                icon: Icons.skip_next,
+                onPressed: canPlayNext ? _playNext : null,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTransportButton({
+    required Key key,
+    required IconData icon,
+    required VoidCallback? onPressed,
+  }) {
+    return SizedBox(
+      width: 32,
+      height: 32,
+      child: IconButton(
+        key: key,
+        padding: EdgeInsets.zero,
+        iconSize: 20,
+        color: Colors.white,
+        disabledColor: Colors.white38,
+        onPressed: onPressed,
+        icon: Icon(icon),
       ),
     );
   }

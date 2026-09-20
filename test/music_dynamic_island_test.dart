@@ -57,4 +57,23 @@ void main() {
     expect(find.byKey(const Key('music_dynamic_island')), findsOneWidget);
     expect(find.byKey(const Key('music_dynamic_island_ring')), findsOneWidget);
   });
+
+  testWidgets('tap island toggles expanded controls', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: MusicDynamicIsland(
+            debugForceVisible: true,
+            debugProgress: 0.25,
+          ),
+        ),
+      ),
+    );
+    expect(find.byKey(const Key('music_island_play')), findsNothing);
+    await tester.tap(find.byKey(const Key('music_dynamic_island')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('music_island_play')), findsOneWidget);
+    expect(find.byKey(const Key('music_island_prev')), findsOneWidget);
+    expect(find.byKey(const Key('music_island_next')), findsOneWidget);
+  });
 }
