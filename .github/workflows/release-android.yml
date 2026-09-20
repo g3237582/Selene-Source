@@ -10,6 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,6 +40,31 @@ jobs:
 
       - name: Test
         run: flutter test
+
+      # android/app/build.gradle.kts reads android/key.properties (rootProject)
+      # and resolves storeFile relative to android/app/.
+      # Missing secrets must fail the job — do not fall back to debug signing.
+      - name: Configure Android release signing
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ] || \
+             [ -z "${ANDROID_KEYSTORE_PASSWORD:-}" ] || \
+             [ -z "${ANDROID_KEY_ALIAS:-}" ] || \
+             [ -z "${ANDROID_KEY_PASSWORD:-}" ]; then
+            echo "Missing Android release signing secrets (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD). Refusing to fall back to debug signing."
+            exit 1
+          fi
+          printf '%s\n' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          if [ ! -s android/app/upload-keystore.jks ]; then
+            echo "Decoded keystore is empty. Check ANDROID_KEYSTORE_BASE64."
+            exit 1
+          fi
+          {
+            printf 'storePassword=%s\n' "$ANDROID_KEYSTORE_PASSWORD"
+            printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
+            printf 'keyAlias=%s\n' "$ANDROID_KEY_ALIAS"
+            printf 'storeFile=%s\n' "upload-keystore.jks"
+          } > android/key.properties
 
       - name: Build split APKs
         run: |
@@ -70,4 +100,5 @@ jobs:
 
             **安装说明**
             - 手机优先下载 `selene-*-armv8.apk`
-            - 本包为 CI 调试签名。若已安装官方 Selene，需要先卸载再装，否则会提示签名不一致。
+            - 本仓库 Releases 使用稳定发布签名，后续本仓库更新可直接覆盖安装。
+            - 若当前已装的是旧的调试签名包或其他签名包，首次切换到新签名时仍需先卸载一次。
