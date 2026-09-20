@@ -30,6 +30,7 @@ class _BooksScreenState extends State<BooksScreen> {
   bool _loading = true;
   String? _error;
   int _tab = 0;
+  int _discoverGeneration = 0;
 
   @override
   void initState() {
@@ -89,6 +90,7 @@ class _BooksScreenState extends State<BooksScreen> {
       return;
     }
 
+    final generation = reset ? ++_discoverGeneration : _discoverGeneration;
     if (reset) {
       setState(() {
         _loading = true;
@@ -109,48 +111,75 @@ class _BooksScreenState extends State<BooksScreen> {
         );
         result = PagedResult(items: items, hasMore: false);
       } else {
-        final catalog = await _fetchCatalog(firstBatch: reset || _page.items.isEmpty);
+        final fetched = await _fetchCatalog(firstBatch: reset || _page.items.isEmpty);
+        if (!mounted || generation != _discoverGeneration) return;
+        if (reset && fetched.catalog.navigation.isNotEmpty) {
+          _navigation = fetched.catalog.navigation;
+        }
+        if (reset && fetched.selectedHref != null) {
+          _catalogHref = fetched.selectedHref!;
+        }
         result = PagedResult(
-          items: catalog.entries,
-          hasMore: catalog.nextHref.isNotEmpty && catalog.entries.isNotEmpty,
-          nextToken: catalog.nextHref,
+          items: fetched.catalog.entries,
+          hasMore: fetched.catalog.nextHref.isNotEmpty &&
+              fetched.catalog.entries.isNotEmpty,
+          nextToken: fetched.catalog.nextHref,
         );
       }
-      if (!mounted) return;
+      if (!mounted || generation != _discoverGeneration) return;
       setState(() {
         _page = (reset ? const PagedListState<BookItem>() : _page).append(result);
         _loading = false;
         _error = null;
       });
-      _loadingMore.value = false;
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _discoverGeneration) return;
       setState(() {
         _error = error.toString().replaceFirst('Exception: ', '');
         _loading = false;
       });
-      _loadingMore.value = false;
+    } finally {
+      if (generation == _discoverGeneration) {
+        _loadingMore.value = false;
+      }
     }
   }
 
-  Future<BookCatalog> _fetchCatalog({required bool firstBatch}) async {
+  Future<({BookCatalog catalog, String? selectedHref})> _fetchCatalog({
+    required bool firstBatch,
+  }) async {
     if (!firstBatch) {
-      return BooksService.catalog(sourceId: _sourceId!, href: _page.nextToken);
+      return (
+        catalog: await BooksService.catalog(
+          sourceId: _sourceId!,
+          href: _page.nextToken,
+        ),
+        selectedHref: null,
+      );
     }
     if (_catalogHref.isEmpty) {
       final root = await BooksService.catalog(sourceId: _sourceId!, href: '');
-      _navigation = root.navigation;
       final autoHref = resolveDefaultBookCatalogHref(
         entries: root.entries,
         navigation: root.navigation,
       );
       if (autoHref != null) {
-        _catalogHref = autoHref;
-        return BooksService.catalog(sourceId: _sourceId!, href: autoHref);
+        final page = await BooksService.catalog(sourceId: _sourceId!, href: autoHref);
+        return (
+          catalog: BookCatalog(
+            entries: page.entries,
+            navigation: root.navigation,
+            nextHref: page.nextHref,
+          ),
+          selectedHref: autoHref,
+        );
       }
-      return root;
+      return (catalog: root, selectedHref: null);
     }
-    return BooksService.catalog(sourceId: _sourceId!, href: _catalogHref);
+    return (
+      catalog: await BooksService.catalog(sourceId: _sourceId!, href: _catalogHref),
+      selectedHref: null,
+    );
   }
 
   Future<void> _loadShelf() async {

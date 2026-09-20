@@ -2,6 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:selene/widgets/paged_catalog_scroll.dart';
 
+ScrollPosition _position(WidgetTester tester) {
+  return tester.state<ScrollableState>(find.byType(Scrollable)).position;
+}
+
+Future<void> _jumpNearBottom(WidgetTester tester) async {
+  final position = _position(tester);
+  position.jumpTo(position.maxScrollExtent);
+  await tester.pump();
+}
+
 void main() {
   testWidgets('keeps catalog items and scroll offset while the next page loads',
       (tester) async {
@@ -30,12 +40,10 @@ void main() {
     expect(find.text('加载中…'), findsNothing);
     expect(loads, 0);
 
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -1800));
-    await tester.pump();
-
+    await _jumpNearBottom(tester);
     expect(loads, greaterThan(0));
-    final offset =
-        tester.state<ScrollableState>(find.byType(Scrollable)).position.pixels;
+
+    final offset = _position(tester).pixels;
     expect(offset, greaterThan(0));
 
     final loadsBeforeBusy = loads;
@@ -43,20 +51,17 @@ void main() {
     await tester.pump();
 
     expect(find.text('加载中…'), findsOneWidget);
-    expect(
-      tester.state<ScrollableState>(find.byType(Scrollable)).position.pixels,
-      offset,
-    );
+    expect(_position(tester).pixels, offset);
 
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -240));
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -120));
     await tester.pump();
     expect(loads, loadsBeforeBusy);
     expect(find.text('加载中…'), findsOneWidget);
 
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, 1600));
+    _position(tester).jumpTo(0);
     await tester.pump();
     expect(find.text('item-0'), findsOneWidget);
-    expect(find.text('加载中…'), findsOneWidget);
+    expect(loadingMore.value, isTrue);
   });
 
   testWidgets('does not request another page while a request is already busy',
@@ -66,7 +71,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: PagedCatalogScroll(
-            itemCount: 8,
+            itemCount: 30,
             hasMore: true,
             loadingMore: true,
             onLoadMore: () => loads += 1,
@@ -79,12 +84,11 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -400));
-    await tester.pump();
+    expect(find.text('row-0'), findsOneWidget);
 
+    await _jumpNearBottom(tester);
     expect(loads, 0);
     expect(find.text('加载中…'), findsOneWidget);
-    expect(find.text('row-0'), findsOneWidget);
   });
 
   testWidgets('appends newly loaded items without jumping back to the top',
@@ -114,20 +118,15 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.drag(find.byType(CustomScrollView), const Offset(0, -900));
-    await tester.pump();
+    await _jumpNearBottom(tester);
 
-    final offset =
-        tester.state<ScrollableState>(find.byType(Scrollable)).position.pixels;
+    final offset = _position(tester).pixels;
     expect(offset, greaterThan(0));
 
     rebuild(() => itemCount = 36);
     await tester.pump();
 
-    expect(
-      tester.state<ScrollableState>(find.byType(Scrollable)).position.pixels,
-      offset,
-    );
+    expect(_position(tester).pixels, offset);
     expect(find.text('card-0'), findsNothing);
   });
 }

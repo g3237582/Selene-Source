@@ -35,6 +35,8 @@ class _MusicScreenState extends State<MusicScreen> {
   bool _searching = false;
   bool _loadingHome = true;
   String? _error;
+  int _playlistGeneration = 0;
+  int _searchGeneration = 0;
 
   bool get _inSearch => _searchController.text.trim().isNotEmpty;
 
@@ -108,6 +110,7 @@ class _MusicScreenState extends State<MusicScreen> {
     if (!reset && (_loadingHome || _loadingMore.value || !_playlistPage.hasMore)) {
       return;
     }
+    final generation = reset ? ++_playlistGeneration : _playlistGeneration;
     if (reset) {
       _loadingMore.value = false;
     } else {
@@ -120,7 +123,7 @@ class _MusicScreenState extends State<MusicScreen> {
         sortId: _sortId,
         page: reset ? 1 : _playlistPage.nextPage,
       );
-      if (!mounted) return;
+      if (!mounted || generation != _playlistGeneration) return;
       final result = PagedResult(
         items: page.items,
         hasMore: page.hasMore && page.items.isNotEmpty,
@@ -133,16 +136,18 @@ class _MusicScreenState extends State<MusicScreen> {
           _loadingHome = false;
         }
       });
-      _loadingMore.value = false;
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _playlistGeneration) return;
       if (reset) {
         rethrow;
       }
       setState(() {
         _error = error.toString().replaceFirst('Exception: ', '');
       });
-      _loadingMore.value = false;
+    } finally {
+      if (generation == _playlistGeneration) {
+        _loadingMore.value = false;
+      }
     }
   }
 
@@ -160,6 +165,7 @@ class _MusicScreenState extends State<MusicScreen> {
       return;
     }
 
+    final generation = reset ? ++_searchGeneration : _searchGeneration;
     if (reset) {
       setState(() {
         _searching = true;
@@ -177,20 +183,22 @@ class _MusicScreenState extends State<MusicScreen> {
         source: _source,
         page: reset ? 1 : _searchPage.nextPage,
       );
-      if (!mounted) return;
+      if (!mounted || generation != _searchGeneration) return;
       setState(() {
         _searchPage =
             (reset ? const PagedListState<MusicTrack>() : _searchPage).append(result);
         _searching = false;
       });
-      _loadingMore.value = false;
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _searchGeneration) return;
       setState(() {
         _error = error.toString().replaceFirst('Exception: ', '');
         _searching = false;
       });
-      _loadingMore.value = false;
+    } finally {
+      if (generation == _searchGeneration) {
+        _loadingMore.value = false;
+      }
     }
   }
 

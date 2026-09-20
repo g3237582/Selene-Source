@@ -28,6 +28,7 @@ class _MangaScreenState extends State<MangaScreen> {
   bool _loading = true;
   String? _error;
   int _tab = 0;
+  int _discoverGeneration = 0;
 
   @override
   void initState() {
@@ -87,6 +88,7 @@ class _MangaScreenState extends State<MangaScreen> {
       return;
     }
 
+    final generation = reset ? ++_discoverGeneration : _discoverGeneration;
     if (reset) {
       setState(() {
         _loading = true;
@@ -109,23 +111,25 @@ class _MangaScreenState extends State<MangaScreen> {
               sourceId: _sourceId,
               page: reset ? 1 : _page.nextPage,
             );
-      if (!mounted) return;
+      if (!mounted || generation != _discoverGeneration) return;
       final page = result.items.isEmpty
-          ? PagedResult<MangaItem>(items: const [], hasMore: false)
+          ? const PagedResult<MangaItem>(items: [], hasMore: false)
           : result;
       setState(() {
         _page = (reset ? const PagedListState<MangaItem>() : _page).append(page);
         _loading = false;
         _error = null;
       });
-      _loadingMore.value = false;
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _discoverGeneration) return;
       setState(() {
         _error = error.toString().replaceFirst('Exception: ', '');
         _loading = false;
       });
-      _loadingMore.value = false;
+    } finally {
+      if (generation == _discoverGeneration) {
+        _loadingMore.value = false;
+      }
     }
   }
 
