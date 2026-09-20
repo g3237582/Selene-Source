@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: read
     env:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -18,6 +19,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -81,24 +85,61 @@ jobs:
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "dist/selene-${VERSION}-armv8.apk"
           ls -lh dist
 
+      # Real per-version notes: GitHub generate-notes since the previous v* tag,
+      # then a short stable install footer. Do not reuse a static feature list.
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          git fetch --force --tags
+
+          PREV_TAG="$(git tag -l 'v*' --sort=-v:refname | awk -v cur="$TAG" '$0 != cur { print; exit }')"
+          echo "Current tag: ${TAG}"
+          echo "Previous tag: ${PREV_TAG:-<none>}"
+
+          api_args=(
+            --method POST
+            "repos/${GITHUB_REPOSITORY}/releases/generate-notes"
+            -f tag_name="$TAG"
+            -f target_commitish="${GITHUB_SHA}"
+          )
+          if [ -n "${PREV_TAG:-}" ]; then
+            api_args+=(-f previous_tag_name="$PREV_TAG")
+          fi
+
+          NOTES=""
+          if NOTES="$(gh api "${api_args[@]}" --jq .body)" && [ -n "${NOTES}" ]; then
+            echo "Using GitHub-generated release notes."
+          else
+            echo "GitHub generate-notes API failed or returned empty; falling back to git log." >&2
+            if [ -n "${PREV_TAG:-}" ]; then
+              RANGE="${PREV_TAG}..HEAD"
+            else
+              RANGE="HEAD"
+            fi
+            NOTES="$(git log --pretty=format:'- %s' "$RANGE")"
+          fi
+
+          {
+            printf 'Selene %s\n\n' "$TAG"
+            printf '%s\n\n' "$NOTES"
+            cat <<'EOF'
+          **安装说明**
+          - 手机优先下载 `selene-*-armv8.apk`
+          - 本仓库 Releases 使用稳定发布签名，后续本仓库更新可直接覆盖安装。
+          - 若当前已装的是旧的调试签名包或其他签名包，首次切换到新签名时仍需先卸载一次。
+          EOF
+          } > release-notes.md
+
+          echo "----- release-notes.md -----"
+          cat release-notes.md
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Selene ${{ github.ref_name }}
           files: dist/*.apk
-          body: |
-            原生接入 LunaTV 漫画 / 电子书 / 音乐，并优化手机列表加载。
-
-            - 登录后按站点开关横滑显示「漫画 / 电子书 / 音乐」
-            - 影视底栏顺序不变：首页、电影、剧集、动漫、综艺、直播
-            - 漫画 / 电子书 / 音乐列表分页加载，首屏并行请求
-            - 详情章节目录虚拟滚动，避免一次铺开几百章
-            - 漫画：搜索、详情、带登录 Cookie 的图片阅读、书架
-            - 电子书：搜索 / 目录、章节正文阅读
-            - 音乐：搜源播放（默认网易云），迷你条 + 全屏页
-
-            **安装说明**
-            - 手机优先下载 `selene-*-armv8.apk`
-            - 本仓库 Releases 使用稳定发布签名，后续本仓库更新可直接覆盖安装。
-            - 若当前已装的是旧的调试签名包或其他签名包，首次切换到新签名时仍需先卸载一次。
+          body_path: release-notes.md
