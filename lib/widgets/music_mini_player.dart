@@ -89,6 +89,11 @@ class MusicMiniPlayer extends StatelessWidget {
                     onPressed: player.playNext,
                     icon: const Icon(Icons.skip_next),
                   ),
+                  IconButton(
+                    tooltip: '停止播放',
+                    onPressed: player.stopAndClear,
+                    icon: const Icon(Icons.close),
+                  ),
                 ],
               ),
             ),

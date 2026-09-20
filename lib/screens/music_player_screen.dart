@@ -19,6 +19,14 @@ class MusicPlayerScreen extends StatelessWidget {
         return Scaffold(
           appBar: AppBar(
             title: Text(track?.name ?? '正在播放', style: FontUtils.poppins(fontSize: 16)),
+            actions: [
+              if (track != null)
+                IconButton(
+                  tooltip: '停止播放',
+                  onPressed: player.stopAndClear,
+                  icon: const Icon(Icons.stop_circle_outlined),
+                ),
+            ],
           ),
           body: track == null
               ? const Center(child: Text('还没有播放歌曲'))
