@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/music_discovery.dart';
 import '../utils/font_utils.dart';
 import 'authenticated_image.dart';
+import 'paged_catalog_scroll.dart';
 
 class MusicHomeTabBar extends StatelessWidget {
   final int tab;
@@ -132,32 +133,39 @@ class MusicBoardList extends StatelessWidget {
 class MusicPlaylistGrid extends StatelessWidget {
   final List<MusicPlaylist> items;
   final ValueChanged<MusicPlaylist> onTap;
+  final bool hasMore;
+  final ValueNotifier<bool>? loadingMore;
+  final VoidCallback? onLoadMore;
 
   const MusicPlaylistGrid({
     super.key,
     required this.items,
     required this.onTap,
+    this.hasMore = false,
+    this.loadingMore,
+    this.onLoadMore,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (items.isEmpty) {
-      return Center(
-        child: Text('当前音源暂无推荐歌单数据', style: FontUtils.poppins(color: const Color(0xFF7f8c8d))),
-      );
-    }
-    return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+    return PagedCatalogScroll(
+      itemCount: items.length,
+      hasMore: hasMore,
+      loadingMoreListenable: loadingMore,
+      onLoadMore: onLoadMore ?? () {},
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         childAspectRatio: 0.72,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
       ),
-      itemCount: items.length,
+      empty: Center(
+        child: Text('当前音源暂无推荐歌单数据', style: FontUtils.poppins(color: const Color(0xFF7f8c8d))),
+      ),
       itemBuilder: (context, index) {
         final item = items[index];
         return GestureDetector(
+          key: ValueKey('${item.source}-${item.id}'),
           onTap: () => onTap(item),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
