@@ -186,31 +186,45 @@ class _UserMenuState extends State<UserMenu> {
         );
       }
 
-      final versionInfo = await VersionService.checkForUpdate();
+      final result = await VersionService.checkForUpdate();
 
       if (!mounted) return;
 
-      if (versionInfo != null) {
-        // 有新版本，显示更新对话框
-        await UpdateDialog.show(context, versionInfo);
-      } else {
-        // 已是最新版本
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '当前已是最新版本',
-              style: FontUtils.poppins(color: Colors.white),
+      switch (result.status) {
+        case UpdateCheckStatus.available:
+          if (result.info != null) {
+            await UpdateDialog.show(context, result.info!);
+          }
+          break;
+        case UpdateCheckStatus.upToDate:
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '已是最新版本',
+                style: FontUtils.poppins(color: Colors.white),
+              ),
+              backgroundColor: const Color(0xFF27AE60),
             ),
-            backgroundColor: const Color(0xFF27AE60),
-          ),
-        );
+          );
+          break;
+        case UpdateCheckStatus.failed:
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                result.errorMessage ?? '检查更新失败，请稍后重试',
+                style: FontUtils.poppins(color: Colors.white),
+              ),
+              backgroundColor: const Color(0xFFef4444),
+            ),
+          );
+          break;
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '检查更新失败: ${e.toString()}',
+              '检查更新失败，请稍后重试',
               style: FontUtils.poppins(color: Colors.white),
             ),
             backgroundColor: const Color(0xFFef4444),
@@ -969,8 +983,7 @@ class _UserMenuState extends State<UserMenu> {
                           : MouseCursor.defer,
                       child: GestureDetector(
                         onTap: () async {
-                          final url = Uri.parse(
-                              'https://github.com/MoonTechLab/Selene');
+                          final url = Uri.parse(VersionService.githubRepoUrl);
                           if (await canLaunchUrl(url)) {
                             await launchUrl(url,
                                 mode: LaunchMode.externalApplication);
