@@ -315,7 +315,7 @@ class _UpdateDialogState extends State<UpdateDialog>
                       const SizedBox(height: 8),
                       Text(
                         androidInstall
-                            ? '本包为 CI 调试签名，若与已装版本签名不同，需先卸载再装。'
+                            ? '本仓库 Releases 使用稳定发布签名。若已装的是旧调试签名或其他签名，首次更新需先卸载一次；之后可直接覆盖。'
                             : '自动下载安装仅支持 Android 构建，将打开 GitHub 发布页。',
                         style: FontUtils.poppins(
                           fontSize: 11,
