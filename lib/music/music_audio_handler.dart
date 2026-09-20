@@ -43,6 +43,14 @@ class MusicAudioHandler extends BaseAudioHandler
         ) {
     (controller.publisher as _DeferredPublisher).inner = this;
     _player.addListener(_onPlayerChanged);
+    // Position does not notifyListeners; tick the MediaSession so OEM
+    // cards keep a live PlaybackState without rebuilding Flutter UI.
+    _player.player.stream.position.listen((_) {
+      unawaited(controller.syncPositionTick(_snapshot()));
+    });
+    _player.player.stream.duration.listen((_) {
+      unawaited(controller.sync(_snapshot()));
+    });
     _onPlayerChanged();
   }
 
@@ -52,6 +60,8 @@ class MusicAudioHandler extends BaseAudioHandler
   Uri? _artUri;
   int _artGeneration = 0;
   bool _sessionActive = false;
+  String? _lastPublishedId;
+  bool? _lastPublishedPlaying;
 
   void _onPlayerChanged() {
     unawaited(controller.sync(_snapshot()));
@@ -96,6 +106,15 @@ class MusicAudioHandler extends BaseAudioHandler
     final presentation = MusicSessionPresentation.from(nowPlaying);
     mediaItem.add(_toMediaItem(nowPlaying, _artUriFor(nowPlaying)));
     playbackState.add(_toPlaybackState(nowPlaying, presentation));
+    if (_lastPublishedId != nowPlaying.id ||
+        _lastPublishedPlaying != nowPlaying.playing) {
+      debugPrint(
+        'Music media session publish id=${nowPlaying.id} '
+        'playing=${nowPlaying.playing} loading=${nowPlaying.loading}',
+      );
+      _lastPublishedId = nowPlaying.id;
+      _lastPublishedPlaying = nowPlaying.playing;
+    }
     unawaited(_refreshArtwork(nowPlaying));
   }
 
@@ -103,6 +122,8 @@ class MusicAudioHandler extends BaseAudioHandler
   Future<void> clear() async {
     _artTrackId = null;
     _artUri = null;
+    _lastPublishedId = null;
+    _lastPublishedPlaying = null;
     mediaItem.add(null);
     if (!_sessionActive) return;
     _sessionActive = false;

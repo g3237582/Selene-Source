@@ -55,12 +55,18 @@ void main() {
     artist: '周杰伦',
   );
 
-  MusicNowPlaying snapshot({bool playing = true}) {
+  MusicNowPlaying snapshot({
+    bool playing = true,
+    Duration position = Duration.zero,
+    Duration duration = Duration.zero,
+  }) {
     return MusicNowPlaying.fromPlayer(
       current: song,
       queue: [song],
       queueIndex: 0,
       playing: playing,
+      position: position,
+      duration: duration,
     )!;
   }
 
@@ -97,5 +103,64 @@ void main() {
 
     expect(commands.calls, ['play', 'pause', 'next', 'previous', 'seek', 'stop']);
     expect(commands.seekTo, const Duration(seconds: 12));
+  });
+
+  test('playing snapshot publishes immediately so the media card can appear', () async {
+    final publisher = _RecordingPublisher();
+    final controller = MusicMediaSessionController(
+      commands: _RecordingCommands(),
+      publisher: publisher,
+    );
+
+    await controller.sync(
+      snapshot(playing: true, duration: const Duration(seconds: 240)),
+    );
+
+    expect(publisher.publishCount, 1);
+    expect(publisher.last?.playing, isTrue);
+    expect(publisher.last?.duration, const Duration(seconds: 240));
+  });
+
+  test('position ticks republish while playing and are throttled', () async {
+    final publisher = _RecordingPublisher();
+    final controller = MusicMediaSessionController(
+      commands: _RecordingCommands(),
+      publisher: publisher,
+    );
+    final start = DateTime.utc(2026, 9, 20, 14);
+
+    await controller.sync(
+      snapshot(position: const Duration(seconds: 1)),
+      now: start,
+    );
+    await controller.syncPositionTick(
+      snapshot(position: const Duration(seconds: 1, milliseconds: 200)),
+      now: start.add(const Duration(milliseconds: 200)),
+    );
+    await controller.syncPositionTick(
+      snapshot(position: const Duration(seconds: 2)),
+      now: start.add(const Duration(seconds: 1)),
+    );
+
+    expect(publisher.publishCount, 2);
+    expect(publisher.last?.position, const Duration(seconds: 2));
+  });
+
+  test('paused position ticks do not keep republishing the card', () async {
+    final publisher = _RecordingPublisher();
+    final controller = MusicMediaSessionController(
+      commands: _RecordingCommands(),
+      publisher: publisher,
+    );
+    final start = DateTime.utc(2026, 9, 20, 14);
+
+    await controller.sync(snapshot(playing: false), now: start);
+    await controller.syncPositionTick(
+      snapshot(playing: false, position: const Duration(seconds: 8)),
+      now: start.add(const Duration(seconds: 2)),
+    );
+
+    expect(publisher.publishCount, 1);
+    expect(publisher.last?.position, Duration.zero);
   });
 }

@@ -1,3 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Keep ic_stat_music: R8 stripping a custom notification icon can hide the MediaStyle card. -->
 <resources xmlns:tools="http://schemas.android.com/tools"
-    tools:keep="@drawable/*,@mipmap/*" />
+    tools:keep="@drawable/ic_stat_music,@drawable/*,@mipmap/*" />
