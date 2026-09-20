@@ -2,7 +2,7 @@
 
 日期：2026-09-20  
 仓库：https://github.com/g3237582/Selene-Source  
-状态：待用户审阅
+状态：已在 PR https://github.com/g3237582/Selene-Source/pull/9 实现（未合并、未发版）
 
 ## 背景
 
