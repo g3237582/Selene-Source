@@ -1,10 +1,10 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../music/music_now_playing.dart';
 import '../screens/music_player_screen.dart';
+import '../services/music_player_route_tracker.dart';
 import '../services/music_player_service.dart';
 import 'authenticated_image.dart';
 
@@ -183,14 +183,22 @@ class MusicDynamicIslandState extends State<MusicDynamicIsland>
     }
 
     final player = MusicPlayerService.instance;
+    final routeTracker = MusicPlayerRouteTracker.instance;
     return AnimatedBuilder(
-      animation: player,
+      animation: Listenable.merge([player, routeTracker]),
       builder: (context, _) {
         final track = player.current;
         if (!shouldShowMusicIsland(
           hasCurrentTrack: track != null,
-          isOnFullPlayerRoute: false,
+          isOnFullPlayerRoute: routeTracker.isActive,
         )) {
+          if (_expanded) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                collapse();
+              }
+            });
+          }
           return const SizedBox.shrink();
         }
         return _buildVisibleIsland(
@@ -222,31 +230,44 @@ class MusicDynamicIslandState extends State<MusicDynamicIsland>
     required bool canPlayPrevious,
     required bool canPlayNext,
   }) {
-    return Center(
-      child: CustomPaint(
-        key: const Key('music_dynamic_island_ring'),
-        painter: _IslandProgressRingPainter(
-          progress: progress,
-          color: _accent,
-          trackColor: Colors.white24,
-          strokeWidth: _strokeWidth,
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(_strokeWidth),
-          child: AnimatedBuilder(
-            animation: _expandController,
-            builder: (context, _) {
-              return _buildCapsule(
-                title: title,
-                coverUrl: coverUrl,
-                playing: playing,
-                canPlayPrevious: canPlayPrevious,
-                canPlayNext: canPlayNext,
-              );
-            },
+    return Stack(
+      children: [
+        if (_expanded)
+          Positioned.fill(
+            child: GestureDetector(
+              key: const Key('music_dynamic_island_dismiss'),
+              behavior: HitTestBehavior.translucent,
+              onTap: collapse,
+            ),
+          ),
+        Align(
+          alignment: Alignment.topCenter,
+          child: CustomPaint(
+            key: const Key('music_dynamic_island_ring'),
+            painter: _IslandProgressRingPainter(
+              progress: progress,
+              color: _accent,
+              trackColor: Colors.white24,
+              strokeWidth: _strokeWidth,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(_strokeWidth),
+              child: AnimatedBuilder(
+                animation: _expandController,
+                builder: (context, _) {
+                  return _buildCapsule(
+                    title: title,
+                    coverUrl: coverUrl,
+                    playing: playing,
+                    canPlayPrevious: canPlayPrevious,
+                    canPlayNext: canPlayNext,
+                  );
+                },
+              ),
+            ),
           ),
         ),
-      ),
+      ],
     );
   }
 

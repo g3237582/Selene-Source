@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:selene/services/music_player_route_tracker.dart';
 import 'package:selene/widgets/music_dynamic_island.dart';
 
 void main() {
+  setUp(() {
+    MusicPlayerRouteTracker.instance.debugReset();
+  });
+
   test('progress fraction clamps and handles zero duration', () {
     expect(
       musicIslandProgressFraction(
@@ -75,5 +80,55 @@ void main() {
     expect(find.byKey(const Key('music_island_play')), findsOneWidget);
     expect(find.byKey(const Key('music_island_prev')), findsOneWidget);
     expect(find.byKey(const Key('music_island_next')), findsOneWidget);
+  });
+
+  test('route tracker flips active flag', () {
+    final t = MusicPlayerRouteTracker.instance;
+    t.debugReset();
+    expect(t.isActive, isFalse);
+    t.enter();
+    expect(t.isActive, isTrue);
+    t.leave();
+    expect(t.isActive, isFalse);
+  });
+
+  testWidgets('outside tap collapses expanded island', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: MusicDynamicIsland(
+            debugForceVisible: true,
+            debugProgress: 0.25,
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('music_dynamic_island')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('music_island_play')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('music_dynamic_island_dismiss')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('music_island_play')), findsNothing);
+  });
+
+  testWidgets('expanded island collapses after idle timeout', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: MusicDynamicIsland(
+            debugForceVisible: true,
+            debugProgress: 0.25,
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('music_dynamic_island')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('music_island_play')), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('music_island_play')), findsNothing);
   });
 }
