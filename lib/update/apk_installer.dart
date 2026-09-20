@@ -40,7 +40,7 @@ class ApkInstaller {
   /// Returns `started` or `needs_permission`.
   static Future<String> install(String filePath) async {
     if (!supportsInAppInstall) {
-      throw const PlatformException(
+      throw PlatformException(
         code: 'unsupported',
         message: '自动安装仅支持 Android 构建',
       );

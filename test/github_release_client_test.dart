@@ -8,6 +8,14 @@ import 'package:selene/update/github_release.dart';
 import 'package:selene/update/github_release_client.dart';
 import 'package:selene/services/version_service.dart';
 
+http.Response _jsonResponse(Object body, [int status = 200]) {
+  return http.Response.bytes(
+    utf8.encode(body is String ? body : json.encode(body)),
+    status,
+    headers: const {'content-type': 'application/json; charset=utf-8'},
+  );
+}
+
 Map<String, dynamic> _releaseJson({
   String tag = 'v1.6.12',
   bool draft = false,
@@ -46,7 +54,7 @@ void main() {
       httpClient: MockClient((request) async {
         expect(request.url.toString(), GithubReleaseClient.latestApiUrl);
         expect(request.headers['User-Agent'], 'Selene-Source');
-        return http.Response(json.encode(_releaseJson()), 200);
+        return _jsonResponse(_releaseJson());
       }),
     );
 
@@ -70,16 +78,13 @@ void main() {
       httpClient: MockClient((request) async {
         calls += 1;
         if (request.url.toString() == GithubReleaseClient.latestApiUrl) {
-          return http.Response('Not Found', 404);
+          return _jsonResponse('Not Found', 404);
         }
         expect(request.url.toString(), GithubReleaseClient.listApiUrl);
-        return http.Response(
-          json.encode([
-            _releaseJson(tag: 'v1.6.13', draft: true),
-            _releaseJson(tag: 'v1.6.12'),
-          ]),
-          200,
-        );
+        return _jsonResponse([
+          _releaseJson(tag: 'v1.6.13', draft: true),
+          _releaseJson(tag: 'v1.6.12'),
+        ]);
       }),
     );
 
@@ -115,7 +120,7 @@ void main() {
 
     final offline = GithubReleaseClient(
       httpClient: MockClient((request) async {
-        throw Exception('socket');
+        throw http.ClientException('socket');
       }),
     );
     expect(

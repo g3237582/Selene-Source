@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
@@ -72,7 +74,11 @@ class GithubReleaseClient {
       response = await _http
           .get(Uri.parse(url), headers: _headers)
           .timeout(timeout);
-    } catch (_) {
+    } on TimeoutException {
+      throw const UpdateCheckException('网络异常，检查更新失败');
+    } on http.ClientException {
+      throw const UpdateCheckException('网络异常，检查更新失败');
+    } on IOException {
       throw const UpdateCheckException('网络异常，检查更新失败');
     }
 
