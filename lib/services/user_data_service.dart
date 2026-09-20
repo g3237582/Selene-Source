@@ -11,6 +11,7 @@ class UserDataService {
   static const String _preferSpeedTestKey = 'prefer_speed_test';
   static const String _localSearchKey = 'local_search';
   static const String _isLocalModeKey = 'is_local_mode';
+  static const String _keepLoggedInKey = 'keep_logged_in';
   
   // 内存缓存
   static bool? _isLocalModeCache;
@@ -73,6 +74,24 @@ class UserDataService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_passwordKey);
     await prefs.remove(_cookiesKey);
+  }
+
+  // 只清除过期 cookies，保留服务器地址、用户名和密码以便刷新
+  static Future<void> clearCookies() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_cookiesKey);
+  }
+
+  // 保存「保持登录」设置
+  static Future<void> saveKeepLoggedIn(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keepLoggedInKey, enabled);
+  }
+
+  // 获取「保持登录」设置（默认为 true，不要自动退出登录）
+  static Future<bool> getKeepLoggedIn() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keepLoggedInKey) ?? true;
   }
 
   // 获取所有用户数据

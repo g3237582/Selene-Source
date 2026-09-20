@@ -5,6 +5,7 @@ import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'services/user_data_service.dart';
 import 'services/api_service.dart';
+import 'services/session_service.dart';
 import 'services/theme_service.dart';
 import 'services/douban_cache_service.dart';
 import 'services/local_mode_storage_service.dart';
@@ -143,14 +144,32 @@ class _AppWrapperState extends State<AppWrapper> {
             MaterialPageRoute(builder: (context) => const HomeScreen()),
           );
         }
+        return;
       }
 
-      // 检查是否有自动登录所需的数据
-      final hasAutoLoginData = await UserDataService.hasAutoLoginData();
-
-      if (!hasAutoLoginData) {
-        // 如果没有自动登录数据，直接进入登录页
+      // 保持登录且本地已有 cookies：直接进首页，不因短暂断网被当成退出
+      if (await SessionService.canRestoreSession()) {
         if (mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (context) => const HomeScreen()),
+          );
+        }
+        return;
+      }
+
+      // 有账号密码但还没有可用 cookies 时，再尝试刷新会话
+      if (await SessionService.shouldAttemptAutoLogin()) {
+        final loginResult = await ApiService.autoLogin();
+        final restored = loginResult.success ||
+            await SessionService.canRestoreSession();
+        if (!mounted) {
+          return;
+        }
+        if (restored) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (context) => const HomeScreen()),
+          );
+        } else {
           setState(() {
             _isLoading = false;
           });
@@ -158,21 +177,10 @@ class _AppWrapperState extends State<AppWrapper> {
         return;
       }
 
-      // 服务器模式：尝试自动登录
-      final loginResult = await ApiService.autoLogin();
-
       if (mounted) {
-        if (loginResult.success) {
-          // 自动登录成功，进入首页
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (context) => const HomeScreen()),
-          );
-        } else {
-          // 自动登录失败，进入登录页
-          setState(() {
-            _isLoading = false;
-          });
-        }
+        setState(() {
+          _isLoading = false;
+        });
       }
     } catch (e) {
       // 发生异常，进入登录页
