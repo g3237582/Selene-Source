@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../services/music_player_service.dart';
 import '../utils/font_utils.dart';
-import '../utils/html_text.dart';
 import '../widgets/authenticated_image.dart';
+import '../widgets/music_lyrics_view.dart';
+import '../widgets/music_progress_bar.dart';
 
 class MusicPlayerScreen extends StatelessWidget {
   const MusicPlayerScreen({super.key});
@@ -94,16 +95,15 @@ class MusicPlayerScreen extends StatelessWidget {
                             style: FontUtils.poppins(color: const Color(0xFFe74c3c)),
                           ),
                         ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 8),
+                      MusicProgressBar(player: player.player),
+                      const SizedBox(height: 12),
                       Expanded(
-                        child: SingleChildScrollView(
-                          child: Text(
-                            stripHtml(player.lyric).isEmpty
-                                ? '暂无歌词'
-                                : stripHtml(player.lyric),
-                            textAlign: TextAlign.center,
-                            style: FontUtils.poppins(height: 1.8, fontSize: 15),
-                          ),
+                        child: MusicLyricsView(
+                          key: ValueKey(player.current?.songId ?? ''),
+                          lyric: player.lyric,
+                          positionStream: player.player.stream.position,
+                          initialPosition: player.player.state.position,
                         ),
                       ),
                     ],
