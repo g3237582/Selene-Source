@@ -1,6 +1,5 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 
 import '../services/music_player_service.dart';
