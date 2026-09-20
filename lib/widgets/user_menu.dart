@@ -37,6 +37,7 @@ class _UserMenuState extends State<UserMenu> {
   String _version = '';
   bool _preferSpeedTest = true;
   bool _localSearch = false;
+  bool _keepLoggedIn = true;
   bool _isLocalMode = false;
 
   @override
@@ -66,6 +67,7 @@ class _UserMenuState extends State<UserMenu> {
     final m3u8ProxyUrl = await UserDataService.getM3u8ProxyUrl();
     final preferSpeedTest = await UserDataService.getPreferSpeedTest();
     final localSearch = await UserDataService.getLocalSearch();
+    final keepLoggedIn = await UserDataService.getKeepLoggedIn();
 
     if (mounted) {
       setState(() {
@@ -77,6 +79,7 @@ class _UserMenuState extends State<UserMenu> {
         _m3u8ProxyUrl = m3u8ProxyUrl;
         _preferSpeedTest = preferSpeedTest;
         _localSearch = localSearch;
+        _keepLoggedIn = keepLoggedIn;
       });
     }
   }
@@ -849,6 +852,24 @@ class _UserMenuState extends State<UserMenu> {
                           });
                         },
                         icon: LucideIcons.search,
+                      ),
+                      Container(
+                        height: 1,
+                        color: widget.isDarkMode
+                            ? const Color(0xFF374151)
+                            : const Color(0xFFe5e7eb),
+                      ),
+                      _buildToggleOption(
+                        title: '保持登录',
+                        value: _keepLoggedIn,
+                        onChanged: (value) async {
+                          await UserDataService.saveKeepLoggedIn(value);
+                          if (!mounted) return;
+                          setState(() {
+                            _keepLoggedIn = value;
+                          });
+                        },
+                        icon: LucideIcons.shieldCheck,
                       ),
                     ],
                     // 分割线

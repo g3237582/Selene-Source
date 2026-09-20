@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'user_data_service.dart';
+import 'session_policy.dart';
+import 'session_service.dart';
 import '../screens/login_screen.dart';
 import '../models/favorite_item.dart';
 import '../models/search_result.dart';
@@ -106,27 +108,63 @@ class ApiService {
     return headers;
   }
 
+  static void _navigateToLogin(BuildContext? context) {
+    if (context != null && context.mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+        (route) => false,
+      );
+    }
+  }
+
+  /// Send an authenticated request, refreshing cookies once on 401.
+  ///
+  /// Transient refresh failures keep the persisted session. Only a confirmed
+  /// credential rejection (or keep-login being off) clears cookies.
+  static Future<ApiResponse<T>> _sendAuthorized<T>(
+    Future<http.Response> Function() send,
+    T Function(dynamic)? fromJson,
+    BuildContext? context,
+  ) async {
+    var response = await send();
+    if (response.statusCode == 401) {
+      final recovery = await SessionService.recoverFromUnauthorized();
+      switch (recovery) {
+        case SessionRecoveryResult.refreshed:
+          response = await send();
+          if (response.statusCode == 401) {
+            return ApiResponse.error(
+              '没有权限访问',
+              statusCode: 401,
+            );
+          }
+          break;
+        case SessionRecoveryResult.transientFailure:
+          return ApiResponse.error(
+            '登录状态暂时无法刷新，请稍后重试',
+            statusCode: 401,
+          );
+        case SessionRecoveryResult.loggedOut:
+          _navigateToLogin(context);
+          return ApiResponse.error(
+            '登录已过期，请重新登录',
+            statusCode: 401,
+          );
+      }
+    }
+
+    return _handleResponse(response, fromJson);
+  }
+
   /// 处理响应
   static Future<ApiResponse<T>> _handleResponse<T>(
     http.Response response,
     T Function(dynamic)? fromJson,
-    BuildContext? context,
   ) async {
-    // 处理401未授权
+    // 401 由 _sendAuthorized 负责刷新/退出，这里不再清空登录数据
     if (response.statusCode == 401) {
-      // 清除用户数据
-      await UserDataService.clearUserData();
-
-      // 跳转到登录页
-      if (context != null && context.mounted) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => const LoginScreen()),
-          (route) => false,
-        );
-      }
-
       return ApiResponse.error(
-        '登录已过期，请重新登录',
+        '没有权限访问',
         statusCode: 401,
       );
     }
@@ -208,16 +246,20 @@ class ApiService {
         url = newUri.toString();
       }
 
-      final requestHeaders = await _buildHeaders(additionalHeaders: headers);
-
-      final response = await http
-          .get(
-            Uri.parse(url),
-            headers: requestHeaders,
-          )
-          .timeout(_timeout);
-
-      return await _handleResponse(response, fromJson, context);
+      return await _sendAuthorized(
+        () async {
+          final requestHeaders =
+              await _buildHeaders(additionalHeaders: headers);
+          return http
+              .get(
+                Uri.parse(url),
+                headers: requestHeaders,
+              )
+              .timeout(_timeout);
+        },
+        fromJson,
+        context,
+      );
     } catch (e) {
       return ApiResponse.error('网络请求异常: ${e.toString()}');
     }
@@ -233,17 +275,22 @@ class ApiService {
   }) async {
     try {
       final url = await _buildUrl(endpoint);
-      final requestHeaders = await _buildHeaders(additionalHeaders: headers);
 
-      final response = await http
-          .post(
-            Uri.parse(url),
-            headers: requestHeaders,
-            body: body != null ? json.encode(body) : null,
-          )
-          .timeout(_timeout);
-
-      return await _handleResponse(response, fromJson, context);
+      return await _sendAuthorized(
+        () async {
+          final requestHeaders =
+              await _buildHeaders(additionalHeaders: headers);
+          return http
+              .post(
+                Uri.parse(url),
+                headers: requestHeaders,
+                body: body != null ? json.encode(body) : null,
+              )
+              .timeout(_timeout);
+        },
+        fromJson,
+        context,
+      );
     } catch (e) {
       return ApiResponse.error('网络请求异常: ${e.toString()}');
     }
@@ -259,17 +306,22 @@ class ApiService {
   }) async {
     try {
       final url = await _buildUrl(endpoint);
-      final requestHeaders = await _buildHeaders(additionalHeaders: headers);
 
-      final response = await http
-          .put(
-            Uri.parse(url),
-            headers: requestHeaders,
-            body: body != null ? json.encode(body) : null,
-          )
-          .timeout(_timeout);
-
-      return await _handleResponse(response, fromJson, context);
+      return await _sendAuthorized(
+        () async {
+          final requestHeaders =
+              await _buildHeaders(additionalHeaders: headers);
+          return http
+              .put(
+                Uri.parse(url),
+                headers: requestHeaders,
+                body: body != null ? json.encode(body) : null,
+              )
+              .timeout(_timeout);
+        },
+        fromJson,
+        context,
+      );
     } catch (e) {
       return ApiResponse.error('网络请求异常: ${e.toString()}');
     }
@@ -284,16 +336,21 @@ class ApiService {
   }) async {
     try {
       final url = await _buildUrl(endpoint);
-      final requestHeaders = await _buildHeaders(additionalHeaders: headers);
 
-      final response = await http
-          .delete(
-            Uri.parse(url),
-            headers: requestHeaders,
-          )
-          .timeout(_timeout);
-
-      return await _handleResponse(response, fromJson, context);
+      return await _sendAuthorized(
+        () async {
+          final requestHeaders =
+              await _buildHeaders(additionalHeaders: headers);
+          return http
+              .delete(
+                Uri.parse(url),
+                headers: requestHeaders,
+              )
+              .timeout(_timeout);
+        },
+        fromJson,
+        context,
+      );
     } catch (e) {
       return ApiResponse.error('网络请求异常: ${e.toString()}');
     }
@@ -310,29 +367,34 @@ class ApiService {
   }) async {
     try {
       final url = await _buildUrl(endpoint);
-      final requestHeaders = await _buildHeaders(
-        additionalHeaders: headers,
-        includeAuth: true,
+
+      return await _sendAuthorized(
+        () async {
+          final requestHeaders = await _buildHeaders(
+            additionalHeaders: headers,
+            includeAuth: true,
+          );
+
+          // 移除Content-Type，让http包自动设置multipart的Content-Type
+          requestHeaders.remove('Content-Type');
+
+          final request = http.MultipartRequest('POST', Uri.parse(url));
+          request.headers.addAll(requestHeaders);
+
+          // 添加文件
+          request.files.add(await http.MultipartFile.fromPath('file', filePath));
+
+          // 添加其他字段
+          if (fields != null) {
+            request.fields.addAll(fields);
+          }
+
+          final streamedResponse = await request.send().timeout(_timeout);
+          return http.Response.fromStream(streamedResponse);
+        },
+        fromJson,
+        context,
       );
-
-      // 移除Content-Type，让http包自动设置multipart的Content-Type
-      requestHeaders.remove('Content-Type');
-
-      final request = http.MultipartRequest('POST', Uri.parse(url));
-      request.headers.addAll(requestHeaders);
-
-      // 添加文件
-      request.files.add(await http.MultipartFile.fromPath('file', filePath));
-
-      // 添加其他字段
-      if (fields != null) {
-        request.fields.addAll(fields);
-      }
-
-      final streamedResponse = await request.send().timeout(_timeout);
-      final response = await http.Response.fromStream(streamedResponse);
-
-      return await _handleResponse(response, fromJson, context);
     } catch (e) {
       return ApiResponse.error('文件上传异常: ${e.toString()}');
     }
@@ -347,18 +409,50 @@ class ApiService {
         return ApiResponse.error('服务器地址未配置');
       }
 
-      final cookies = await _getCookies();
-      if (cookies == null) {
-        return ApiResponse.error('用户未登录');
+      Future<http.Response> sendFavorites() async {
+        final cookies = await _getCookies();
+        if (cookies == null) {
+          throw StateError('用户未登录');
+        }
+        return http.get(
+          Uri.parse('$baseUrl/api/favorites'),
+          headers: {
+            'Accept': 'application/json',
+            'Cookie': cookies,
+          },
+        ).timeout(_timeout);
       }
 
-      final response = await http.get(
-        Uri.parse('$baseUrl/api/favorites'),
-        headers: {
-          'Accept': 'application/json',
-          'Cookie': cookies,
-        },
-      ).timeout(_timeout);
+      http.Response response;
+      try {
+        response = await sendFavorites();
+      } on StateError catch (e) {
+        return ApiResponse.error(e.message);
+      }
+
+      if (response.statusCode == 401) {
+        final recovery = await SessionService.recoverFromUnauthorized();
+        switch (recovery) {
+          case SessionRecoveryResult.refreshed:
+            try {
+              response = await sendFavorites();
+            } on StateError catch (e) {
+              return ApiResponse.error(e.message);
+            }
+            break;
+          case SessionRecoveryResult.transientFailure:
+            return ApiResponse.error(
+              '登录状态暂时无法刷新，请稍后重试',
+              statusCode: 401,
+            );
+          case SessionRecoveryResult.loggedOut:
+            _navigateToLogin(context);
+            return ApiResponse.error(
+              '登录已过期，请重新登录',
+              statusCode: 401,
+            );
+        }
+      }
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(response.body);
@@ -374,14 +468,7 @@ class ApiService {
 
         return ApiResponse.success(favorites, statusCode: response.statusCode);
       } else if (response.statusCode == 401) {
-        // 未授权，跳转到登录页面
-        if (context.mounted) {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (context) => const LoginScreen()),
-          );
-        }
-        return ApiResponse.error('登录已过期，请重新登录',
-            statusCode: response.statusCode);
+        return ApiResponse.error('没有权限访问', statusCode: response.statusCode);
       } else {
         return ApiResponse.error('获取收藏夹失败: ${response.statusCode}',
             statusCode: response.statusCode);
@@ -571,58 +658,16 @@ class ApiService {
 
   /// 自动登录方法
   static Future<ApiResponse<String>> autoLogin() async {
-    try {
-      // 获取用户数据
-      final serverUrl = await UserDataService.getServerUrl();
-      final username = await UserDataService.getUsername();
-      final password = await UserDataService.getPassword();
-
-      if (serverUrl == null || username == null || password == null) {
-        return ApiResponse.error('缺少登录信息');
-      }
-
-      // 处理 URL
-      String baseUrl = serverUrl.trim();
-      if (baseUrl.endsWith('/')) {
-        baseUrl = baseUrl.substring(0, baseUrl.length - 1);
-      }
-      String loginUrl = '$baseUrl/api/login';
-
-      // 发送登录请求
-      final response = await http
-          .post(
-            Uri.parse(loginUrl),
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: json.encode({
-              'username': username,
-              'password': password,
-            }),
-          )
-          .timeout(_timeout);
-
-      if (response.statusCode == 200) {
-        // 解析并保存 cookies
-        String cookies = _parseCookies(response);
-
-        // 更新 cookies
-        await UserDataService.saveUserData(
-          serverUrl: baseUrl,
-          username: username,
-          password: password,
-          cookies: cookies,
-        );
-
-        return ApiResponse.success('自动登录成功', statusCode: response.statusCode);
-      } else {
-        return ApiResponse.error(
-          '自动登录失败: ${response.statusCode}',
-          statusCode: response.statusCode,
-        );
-      }
-    } catch (e) {
-      return ApiResponse.error('自动登录异常: ${e.toString()}');
+    final outcome = await SessionService.refreshSession();
+    switch (outcome) {
+      case SessionRefreshOutcome.success:
+        return ApiResponse.success('自动登录成功', statusCode: 200);
+      case SessionRefreshOutcome.rejected:
+        return ApiResponse.error('自动登录失败: 401', statusCode: 401);
+      case SessionRefreshOutcome.serverError:
+        return ApiResponse.error('自动登录失败', statusCode: 500);
+      case SessionRefreshOutcome.networkError:
+        return ApiResponse.error('自动登录异常: 网络错误');
     }
   }
 
@@ -816,20 +861,4 @@ class ApiService {
     }
   }
 
-  /// 解析 Set-Cookie 头部
-  static String _parseCookies(http.Response response) {
-    List<String> cookies = [];
-
-    // 获取所有 Set-Cookie 头部
-    final setCookieHeaders = response.headers['set-cookie'];
-    if (setCookieHeaders != null) {
-      // HTTP 头部通常是 String 类型
-      final cookieParts = setCookieHeaders.split(';');
-      if (cookieParts.isNotEmpty) {
-        cookies.add(cookieParts[0].trim());
-      }
-    }
-
-    return cookies.join('; ');
-  }
 }
