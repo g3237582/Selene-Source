@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../models/music_track.dart';
-import '../services/music_player_route_tracker.dart';
 import '../services/music_player_service.dart';
 import '../utils/font_utils.dart';
 import '../widgets/authenticated_image.dart';
@@ -17,25 +16,8 @@ class MusicPlayerPageKeys {
   static const controls = Key('music-player-controls');
 }
 
-class MusicPlayerScreen extends StatefulWidget {
+class MusicPlayerScreen extends StatelessWidget {
   const MusicPlayerScreen({super.key});
-
-  @override
-  State<MusicPlayerScreen> createState() => _MusicPlayerScreenState();
-}
-
-class _MusicPlayerScreenState extends State<MusicPlayerScreen> {
-  @override
-  void initState() {
-    super.initState();
-    MusicPlayerRouteTracker.instance.enter();
-  }
-
-  @override
-  void dispose() {
-    MusicPlayerRouteTracker.instance.leave();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
