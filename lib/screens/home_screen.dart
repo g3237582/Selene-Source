@@ -38,12 +38,13 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _currentBottomNavIndex = 0;
   String _selectedTopTab = '首页';
   late PageController _pageController;
   late PageController _bottomNavPageController;
   FeatureFlags _featureFlags = FeatureFlags.disabled;
+  bool _checkingUpdates = false;
 
   @override
   void initState() {
@@ -52,10 +53,11 @@ class _HomeScreenState extends State<HomeScreen> {
     _pageController = PageController(initialPage: 0);
     // 初始化底栏 PageController
     _bottomNavPageController = PageController(initialPage: 0);
+    WidgetsBinding.instance.addObserver(this);
     // 进入首页时直接刷新播放记录和收藏夹缓存
     _refreshCacheOnHomeEnter();
     // 检查应用更新
-    _checkForUpdates();
+    _checkForUpdates(delay: const Duration(seconds: 3));
     _loadFeatureFlags();
   }
 
@@ -68,31 +70,54 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// 检查应用更新
-  void _checkForUpdates() async {
-    // 延迟3秒后检查更新，避免影响页面加载
-    await Future.delayed(const Duration(seconds: 3));
-    if (!mounted) return;
-
+  void _checkForUpdates({Duration delay = Duration.zero}) async {
+    if (_checkingUpdates) {
+      return;
+    }
+    _checkingUpdates = true;
     try {
-      final versionInfo = await VersionService.checkForUpdate();
+      if (delay > Duration.zero) {
+        await Future.delayed(delay);
+      }
+      if (!mounted) {
+        return;
+      }
+      if (!await VersionService.shouldRunAutoCheck()) {
+        return;
+      }
+      await VersionService.markAutoCheckRan();
 
-      if (versionInfo != null && mounted) {
-        final shouldShow = await VersionService.shouldShowUpdatePrompt(
-          versionInfo.latestVersion,
-        );
+      final result = await VersionService.checkForUpdate();
+      if (result.status != UpdateCheckStatus.available ||
+          result.info == null ||
+          !mounted) {
+        return;
+      }
 
-        if (shouldShow && mounted) {
-          UpdateDialog.show(context, versionInfo);
-        }
+      final shouldShow = await VersionService.shouldShowUpdatePrompt(
+        result.info!.latestVersion,
+      );
+      if (shouldShow && mounted) {
+        UpdateDialog.show(context, result.info!);
       }
     } catch (e) {
       // 静默失败，不影响用户体验
-      print('检查更新失败: $e');
+      debugPrint('检查更新失败: $e');
+    } finally {
+      _checkingUpdates = false;
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkForUpdates();
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pageController.dispose();
     _bottomNavPageController.dispose();
     super.dispose();
