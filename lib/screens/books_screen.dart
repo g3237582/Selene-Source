@@ -2,14 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/book.dart';
-import '../search/search_list_paging.dart';
 import '../services/books_service.dart';
 import '../services/theme_service.dart';
 import '../utils/book_catalog.dart';
 import '../utils/font_utils.dart';
 import '../utils/paged_list.dart';
 import '../widgets/authenticated_image.dart';
-import '../widgets/search_pagination_bar.dart';
+import '../widgets/paged_catalog_scroll.dart';
 import 'book_detail_screen.dart';
 
 class BooksScreen extends StatefulWidget {
@@ -21,15 +20,12 @@ class BooksScreen extends StatefulWidget {
 
 class _BooksScreenState extends State<BooksScreen> {
   final TextEditingController _searchController = TextEditingController();
+  final ValueNotifier<bool> _loadingMore = ValueNotifier(false);
   List<BookSource> _sources = [];
   List<BookNavLink> _navigation = [];
   String? _sourceId;
   String _catalogHref = '';
-  String _nextHref = '';
-  List<BookItem> _loadedItems = [];
-  List<BookItem> _items = [];
-  int _page = 1;
-  bool _remoteHasMore = true;
+  PagedListState<BookItem> _page = const PagedListState();
   List<BookItem> _shelf = [];
   bool _loading = true;
   String? _error;
@@ -43,6 +39,7 @@ class _BooksScreenState extends State<BooksScreen> {
 
   @override
   void dispose() {
+    _loadingMore.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -60,12 +57,7 @@ class _BooksScreenState extends State<BooksScreen> {
     await _reloadDiscover();
   }
 
-  Future<void> _reloadDiscover() {
-    _loadedItems = [];
-    _nextHref = '';
-    _remoteHasMore = true;
-    return _loadDiscover(page: 1);
-  }
+  Future<void> _reloadDiscover() => _loadDiscover(reset: true);
 
   Future<void> _loadSources() async {
     try {
@@ -83,64 +75,67 @@ class _BooksScreenState extends State<BooksScreen> {
     }
   }
 
-  Future<void> _loadDiscover({required int page}) async {
+  Future<void> _loadDiscover({required bool reset}) async {
+    if (!reset && (_loading || _loadingMore.value || !_page.hasMore)) {
+      return;
+    }
     final query = _searchController.text.trim();
     if (query.isEmpty && _sourceId == null) {
       setState(() {
         _loading = false;
-        _loadedItems = [];
-        _items = [];
-        _page = 1;
-        _remoteHasMore = false;
+        _page = const PagedListState();
       });
+      _loadingMore.value = false;
       return;
     }
 
-    final needed = page * SearchListPaging.pageSize;
-    if (_loadedItems.length >= needed || !_remoteHasMore) {
-      _applyDiscoverPage(page);
-      return;
+    if (reset) {
+      setState(() {
+        _loading = true;
+        _page = const PagedListState();
+        _error = null;
+      });
+      _loadingMore.value = false;
+    } else {
+      _loadingMore.value = true;
     }
-
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
 
     try {
-      if (query.isNotEmpty && _loadedItems.isEmpty) {
-        _loadedItems = await BooksService.search(
+      late final PagedResult<BookItem> result;
+      if (query.isNotEmpty && (reset || _page.items.isEmpty)) {
+        final items = await BooksService.search(
           query: query,
           sourceId: _sourceId,
         );
-        _remoteHasMore = false;
+        result = PagedResult(items: items, hasMore: false);
       } else {
-        while (_loadedItems.length < needed && _remoteHasMore) {
-          final catalog = await _fetchCatalog(firstBatch: _loadedItems.isEmpty);
-          if (!mounted) return;
-          if (catalog.entries.isEmpty) {
-            _remoteHasMore = false;
-            break;
-          }
-          _loadedItems = [..._loadedItems, ...catalog.entries];
-          _nextHref = catalog.nextHref;
-          _remoteHasMore = catalog.nextHref.isNotEmpty;
-        }
+        final catalog = await _fetchCatalog(firstBatch: reset || _page.items.isEmpty);
+        result = PagedResult(
+          items: catalog.entries,
+          hasMore: catalog.nextHref.isNotEmpty && catalog.entries.isNotEmpty,
+          nextToken: catalog.nextHref,
+        );
       }
       if (!mounted) return;
-      _applyDiscoverPage(page);
+      setState(() {
+        _page = (reset ? const PagedListState<BookItem>() : _page).append(result);
+        _loading = false;
+        _error = null;
+      });
+      _loadingMore.value = false;
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _error = error.toString().replaceFirst('Exception: ', '');
         _loading = false;
       });
+      _loadingMore.value = false;
     }
   }
 
   Future<BookCatalog> _fetchCatalog({required bool firstBatch}) async {
     if (!firstBatch) {
-      return BooksService.catalog(sourceId: _sourceId!, href: _nextHref);
+      return BooksService.catalog(sourceId: _sourceId!, href: _page.nextToken);
     }
     if (_catalogHref.isEmpty) {
       final root = await BooksService.catalog(sourceId: _sourceId!, href: '');
@@ -156,21 +151,6 @@ class _BooksScreenState extends State<BooksScreen> {
       return root;
     }
     return BooksService.catalog(sourceId: _sourceId!, href: _catalogHref);
-  }
-
-  void _applyDiscoverPage(int page) {
-    final pageCount = displayPageCount(
-      loadedCount: _loadedItems.length,
-      pageSize: SearchListPaging.pageSize,
-      remoteHasMore: _remoteHasMore,
-    );
-    final current = SearchListPaging.clampPage(page, pageCount);
-    setState(() {
-      _items = SearchListPaging.pageOf(_loadedItems, current);
-      _page = current;
-      _loading = false;
-      _error = null;
-    });
   }
 
   Future<void> _loadShelf() async {
@@ -321,10 +301,10 @@ class _BooksScreenState extends State<BooksScreen> {
   }
 
   Widget _buildDiscover(Color muted) {
-    if (_loading && _items.isEmpty) {
+    if (_loading && _page.items.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_error != null && _items.isEmpty) {
+    if (_error != null && _page.items.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -332,63 +312,55 @@ class _BooksScreenState extends State<BooksScreen> {
         ),
       );
     }
-    final pageCount = displayPageCount(
-      loadedCount: _loadedItems.length,
-      pageSize: SearchListPaging.pageSize,
-      remoteHasMore: _remoteHasMore,
-    );
-    return Column(
-      children: [
-        Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _BookGrid(items: _items, onTap: _openBook),
-        ),
-        if (_items.isNotEmpty)
-          SearchPaginationBar(
-            totalItems: _items.length,
-            page: _page,
-            pageCount: pageCount,
-            summary: remoteSummaryText(
-              pageItemCount: _items.length,
-              page: _page,
-              pageCount: pageCount,
-            ),
-            onPageChanged: (next) => _loadDiscover(page: next),
-          ),
-      ],
+    return _BookGrid(
+      key: ValueKey(
+        'books-$_sourceId-$_catalogHref-${_searchController.text.trim()}',
+      ),
+      items: _page.items,
+      hasMore: _page.hasMore,
+      loadingMore: _loadingMore,
+      onLoadMore: () => _loadDiscover(reset: false),
+      onTap: _openBook,
     );
   }
 }
 
 class _BookGrid extends StatelessWidget {
   final List<BookItem> items;
+  final bool hasMore;
+  final ValueNotifier<bool>? loadingMore;
+  final VoidCallback? onLoadMore;
   final ValueChanged<BookItem> onTap;
 
   const _BookGrid({
+    super.key,
     required this.items,
+    this.hasMore = false,
+    this.loadingMore,
+    this.onLoadMore,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (items.isEmpty) {
-      return Center(
-        child: Text('暂无书籍', style: FontUtils.poppins(color: const Color(0xFF7f8c8d))),
-      );
-    }
-    return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+    return PagedCatalogScroll(
+      itemCount: items.length,
+      hasMore: hasMore,
+      loadingMoreListenable: loadingMore,
+      onLoadMore: onLoadMore ?? () {},
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
         childAspectRatio: 0.58,
         crossAxisSpacing: 12,
         mainAxisSpacing: 12,
       ),
-      itemCount: items.length,
+      empty: Center(
+        child: Text('暂无书籍', style: FontUtils.poppins(color: const Color(0xFF7f8c8d))),
+      ),
       itemBuilder: (context, index) {
         final item = items[index];
         return GestureDetector(
+          key: ValueKey(item.shelfKey),
           onTap: () => onTap(item),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
