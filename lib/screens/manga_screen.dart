@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../manga/manga_progress.dart';
 import '../models/manga.dart';
 import '../services/manga_service.dart';
 import '../services/theme_service.dart';
@@ -9,6 +10,22 @@ import '../utils/paged_list.dart';
 import '../widgets/authenticated_image.dart';
 import '../widgets/paged_catalog_scroll.dart';
 import 'manga_detail_screen.dart';
+
+typedef _OpenManga = void Function(MangaItem item, {bool resumeIfPossible});
+
+String _shelfProgressLabel(
+  MangaShelfItem item,
+  List<MangaReadRecord> history,
+) {
+  final progress = findMangaProgress(history, item.sourceId, item.mangaId);
+  if (progress != null) {
+    return mangaProgressLabel(progress);
+  }
+  if (item.lastChapterName.isEmpty) {
+    return item.sourceName;
+  }
+  return item.lastChapterName;
+}
 
 class MangaScreen extends StatefulWidget {
   const MangaScreen({super.key});
@@ -147,10 +164,17 @@ class _MangaScreenState extends State<MangaScreen> {
     } catch (_) {}
   }
 
-  void _openManga(MangaItem item) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => MangaDetailScreen(item: item)),
-    );
+  void _openManga(MangaItem item, {bool resumeIfPossible = false}) {
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) => MangaDetailScreen(
+              item: item,
+              resumeIfPossible: resumeIfPossible,
+            ),
+          ),
+        )
+        .then((_) => _loadLibrary());
   }
 
   @override
@@ -170,7 +194,15 @@ class _MangaScreenState extends State<MangaScreen> {
             children: [
               _Chip(label: '发现', selected: _tab == 0, muted: muted, onTap: () => setState(() => _tab = 0)),
               const SizedBox(width: 8),
-              _Chip(label: '书架', selected: _tab == 1, muted: muted, onTap: () => setState(() => _tab = 1)),
+              _Chip(
+                label: '书架',
+                selected: _tab == 1,
+                muted: muted,
+                onTap: () {
+                  setState(() => _tab = 1);
+                  _loadLibrary();
+                },
+              ),
             ],
           ),
         ),
@@ -289,7 +321,7 @@ class _MangaGrid extends StatelessWidget {
   final bool hasMore;
   final ValueNotifier<bool> loadingMore;
   final VoidCallback onLoadMore;
-  final ValueChanged<MangaItem> onTap;
+  final _OpenManga onTap;
 
   const _MangaGrid({
     super.key,
@@ -348,7 +380,7 @@ class _MangaGrid extends StatelessWidget {
 class _MangaLibrary extends StatelessWidget {
   final List<MangaShelfItem> shelf;
   final List<MangaReadRecord> history;
-  final ValueChanged<MangaItem> onTap;
+  final _OpenManga onTap;
 
   const _MangaLibrary({
     required this.shelf,
@@ -392,9 +424,7 @@ class _MangaLibrary extends StatelessWidget {
                     ),
                     title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
                     subtitle: Text(
-                      item.lastChapterName.isEmpty
-                          ? item.sourceName
-                          : item.lastChapterName,
+                      _shelfProgressLabel(item, history),
                       maxLines: 1,
                     ),
                     onTap: () => onTap(item.toItem()),
@@ -426,9 +456,17 @@ class _MangaLibrary extends StatelessWidget {
                   final item = history[index];
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
+                    leading: SizedBox(
+                      width: 48,
+                      height: 64,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: AuthenticatedImage(url: item.cover),
+                      ),
+                    ),
                     title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    subtitle: Text(item.chapterName, maxLines: 1),
-                    onTap: () => onTap(item.toItem()),
+                    subtitle: Text(mangaProgressLabel(item), maxLines: 1),
+                    onTap: () => onTap(item.toItem(), resumeIfPossible: true),
                   );
                 },
                 childCount: history.length,

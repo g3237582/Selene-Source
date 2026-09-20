@@ -1,8 +1,10 @@
+import '../manga/manga_progress.dart';
 import '../models/manga.dart';
 import '../utils/json_records.dart';
 import '../utils/paged_list.dart';
 import '../utils/remote_error.dart';
 import 'api_service.dart';
+import 'local_mode_storage_service.dart';
 
 class MangaService {
   static Future<List<MangaSource>> getSources() async {
@@ -213,13 +215,27 @@ class MangaService {
   }
 
   static Future<List<MangaReadRecord>> getHistory() async {
-    final response = await ApiService.get('/api/manga/history');
-    if (!response.success) {
-      throw Exception(response.message ?? '获取漫画阅读历史失败');
+    final local = await LocalModeStorageService.getMangaReadRecords();
+    try {
+      final response = await ApiService.get('/api/manga/history');
+      if (!response.success) {
+        return local;
+      }
+      final remote = asRecordList(response.data)
+          .map(MangaReadRecord.fromJson)
+          .toList();
+      return mergeMangaHistory(remote: remote, local: local);
+    } catch (_) {
+      return local;
     }
-    return asRecordList(response.data)
-        .map(MangaReadRecord.fromJson)
-        .toList();
+  }
+
+  static Future<MangaReadRecord?> getProgress({
+    required String sourceId,
+    required String mangaId,
+  }) async {
+    final history = await getHistory();
+    return findMangaProgress(history, sourceId, mangaId);
   }
 
   static Future<void> saveHistory({
@@ -228,23 +244,29 @@ class MangaService {
     required int pageIndex,
     required int pageCount,
   }) async {
-    await ApiService.post(
-      '/api/manga/history',
-      body: {
-        'key': manga.shelfKey,
-        'record': {
-          'title': manga.title,
-          'cover': manga.cover,
-          'sourceId': manga.sourceId,
-          'sourceName': manga.sourceName,
-          'mangaId': manga.id,
-          'chapterId': chapter.id,
-          'chapterName': chapter.name,
-          'pageIndex': pageIndex,
-          'pageCount': pageCount,
-          'saveTime': DateTime.now().millisecondsSinceEpoch,
-        },
-      },
+    final record = MangaReadRecord(
+      title: manga.title,
+      cover: manga.cover,
+      sourceId: manga.sourceId,
+      sourceName: manga.sourceName,
+      mangaId: manga.id,
+      chapterId: chapter.id,
+      chapterName: chapter.name,
+      pageIndex: pageIndex,
+      pageCount: pageCount,
+      saveTime: DateTime.now().millisecondsSinceEpoch,
     );
+    await LocalModeStorageService.saveMangaReadRecord(record);
+    try {
+      await ApiService.post(
+        '/api/manga/history',
+        body: {
+          'key': manga.shelfKey,
+          'record': record.toJson(),
+        },
+      );
+    } catch (_) {
+      // 本地进度已写入，远端同步失败不影响续读。
+    }
   }
 }

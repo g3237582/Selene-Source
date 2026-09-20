@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../manga/manga_progress.dart';
 import '../models/manga.dart';
 import '../services/manga_service.dart';
 import '../services/theme_service.dart';
@@ -11,8 +12,13 @@ import 'manga_reader_screen.dart';
 
 class MangaDetailScreen extends StatefulWidget {
   final MangaItem item;
+  final bool resumeIfPossible;
 
-  const MangaDetailScreen({super.key, required this.item});
+  const MangaDetailScreen({
+    super.key,
+    required this.item,
+    this.resumeIfPossible = false,
+  });
 
   @override
   State<MangaDetailScreen> createState() => _MangaDetailScreenState();
@@ -20,8 +26,10 @@ class MangaDetailScreen extends StatefulWidget {
 
 class _MangaDetailScreenState extends State<MangaDetailScreen> {
   MangaDetail? _detail;
+  MangaReadRecord? _progress;
   bool _loading = true;
   bool _onShelf = false;
+  bool _didAutoResume = false;
   String? _error;
   RemoteErrorInfo? _remoteError;
 
@@ -61,12 +69,21 @@ class _MangaDetailScreenState extends State<MangaDetailScreen> {
           (item) => item.sourceId == detail.sourceId && item.mangaId == detail.id,
         );
       } catch (_) {}
+      MangaReadRecord? progress;
+      try {
+        progress = await MangaService.getProgress(
+          sourceId: detail.sourceId,
+          mangaId: detail.id,
+        );
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _detail = detail;
+        _progress = progress;
         _onShelf = onShelf;
         _loading = false;
       });
+      _maybeAutoResume(detail, progress);
     } catch (error) {
       if (!mounted) return;
       final parsed = parseRemoteError(error, fallback: '获取漫画详情失败');
@@ -104,18 +121,73 @@ class _MangaDetailScreenState extends State<MangaDetailScreen> {
     }
   }
 
-  void _openChapter(MangaChapter chapter) {
+  Future<void> _reloadProgress() async {
     final detail = _detail;
     if (detail == null) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => MangaReaderScreen(
-          manga: detail,
-          chapters: detail.chapters,
-          initialChapter: chapter,
-        ),
-      ),
+    try {
+      final progress = await MangaService.getProgress(
+        sourceId: detail.sourceId,
+        mangaId: detail.id,
+      );
+      if (!mounted) return;
+      setState(() => _progress = progress);
+    } catch (_) {}
+  }
+
+  void _maybeAutoResume(MangaDetail detail, MangaReadRecord? progress) {
+    if (!widget.resumeIfPossible || _didAutoResume) {
+      return;
+    }
+    final resume = resolveMangaResume(
+      chapters: detail.chapters,
+      record: progress,
     );
+    if (resume == null) {
+      return;
+    }
+    _didAutoResume = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _openChapter(resume.chapter, pageIndex: resume.pageIndex);
+    });
+  }
+
+  void _openResume() {
+    final detail = _detail;
+    if (detail == null || detail.chapters.isEmpty) return;
+    final resume = resolveMangaResume(
+      chapters: detail.chapters,
+      record: _progress,
+    );
+    _openChapter(
+      resume?.chapter ?? detail.chapters.first,
+      pageIndex: resume?.pageIndex ?? 0,
+    );
+  }
+
+  void _openChapter(MangaChapter chapter, {int? pageIndex}) {
+    final detail = _detail;
+    if (detail == null) return;
+    final resume = resolveMangaResume(
+      chapters: detail.chapters,
+      record: _progress,
+    );
+    final startPage = pageIndex ??
+        (resume != null && resume.chapter.id == chapter.id
+            ? resume.pageIndex
+            : 0);
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) => MangaReaderScreen(
+              manga: detail,
+              chapters: detail.chapters,
+              initialChapter: chapter,
+              initialPageIndex: startPage,
+            ),
+          ),
+        )
+        .then((_) => _reloadProgress());
   }
 
   @override
@@ -151,6 +223,26 @@ class _MangaDetailScreenState extends State<MangaDetailScreen> {
                     ),
                   ),
                 ),
+                if (_progress != null &&
+                    detail != null &&
+                    detail.chapters.isNotEmpty)
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                    sliver: SliverToBoxAdapter(
+                      child: FilledButton.icon(
+                        onPressed: _openResume,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF27ae60),
+                          foregroundColor: Colors.white,
+                        ),
+                        icon: const Icon(Icons.menu_book),
+                        label: Text(
+                          mangaContinueLabel(_progress!),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ),
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                   sliver: SliverToBoxAdapter(
@@ -206,10 +298,29 @@ class _MangaDetailScreenState extends State<MangaDetailScreen> {
                       delegate: SliverChildBuilderDelegate(
                         (context, index) {
                           final chapter = detail.chapters[index];
+                          final isCurrent = _progress?.chapterId == chapter.id;
                           return ListTile(
                             contentPadding: EdgeInsets.zero,
-                            title: Text(chapter.name),
-                            trailing: const Icon(Icons.chevron_right),
+                            title: Text(
+                              chapter.name,
+                              style: FontUtils.poppins(
+                                fontWeight: isCurrent
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                                color: isCurrent
+                                    ? const Color(0xFF27ae60)
+                                    : null,
+                              ),
+                            ),
+                            trailing: isCurrent
+                                ? Text(
+                                    '续读',
+                                    style: FontUtils.poppins(
+                                      color: const Color(0xFF27ae60),
+                                      fontSize: 12,
+                                    ),
+                                  )
+                                : const Icon(Icons.chevron_right),
                             onTap: () => _openChapter(chapter),
                           );
                         },

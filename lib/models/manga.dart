@@ -166,6 +166,7 @@ class MangaReadRecord {
   final String chapterName;
   final int pageIndex;
   final int pageCount;
+  final int saveTime;
 
   const MangaReadRecord({
     required this.title,
@@ -177,7 +178,10 @@ class MangaReadRecord {
     required this.chapterName,
     this.pageIndex = 0,
     this.pageCount = 0,
+    this.saveTime = 0,
   });
+
+  String get shelfKey => '$sourceId+$mangaId';
 
   factory MangaReadRecord.fromJson(Map<String, dynamic> json) {
     return MangaReadRecord(
@@ -194,7 +198,25 @@ class MangaReadRecord {
       pageCount: json['pageCount'] is int
           ? json['pageCount'] as int
           : int.tryParse(json['pageCount']?.toString() ?? '') ?? 0,
+      saveTime: json['saveTime'] is int
+          ? json['saveTime'] as int
+          : int.tryParse(json['saveTime']?.toString() ?? '') ?? 0,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'title': title,
+      'cover': cover,
+      'sourceId': sourceId,
+      'sourceName': sourceName,
+      'mangaId': mangaId,
+      'chapterId': chapterId,
+      'chapterName': chapterName,
+      'pageIndex': pageIndex,
+      'pageCount': pageCount,
+      'saveTime': saveTime,
+    };
   }
 
   MangaItem toItem() {

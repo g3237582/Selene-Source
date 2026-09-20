@@ -4,9 +4,10 @@ import '../models/search_resource.dart';
 import '../models/live_source.dart';
 import '../models/play_record.dart';
 import '../models/favorite_item.dart';
+import '../models/manga.dart';
 
 /// 本地模式存储服务
-/// 用于持久化存储本地模式下的订阅信息、播放记录、收藏夹和搜索记录
+/// 用于持久化存储本地模式下的订阅信息、播放记录、收藏夹、搜索记录和漫画阅读进度
 class LocalModeStorageService {
   static const String _subscriptionUrlKey = 'local_mode_subscription_url';
   static const String _searchSourcesKey = 'local_mode_search_sources';
@@ -14,6 +15,7 @@ class LocalModeStorageService {
   static const String _playRecordsKey = 'local_mode_play_records';
   static const String _favoritesKey = 'local_mode_favorites';
   static const String _searchHistoryKey = 'local_mode_search_history';
+  static const String _mangaReadRecordsKey = 'local_mode_manga_read_records';
 
   // 内存缓存
   static List<FavoriteItem>? _favoritesCache;
@@ -321,6 +323,64 @@ class LocalModeStorageService {
     await prefs.remove(_searchHistoryKey);
   }
 
+  // ==================== 漫画阅读进度 ====================
+
+  /// 保存漫画阅读记录列表
+  static Future<void> saveMangaReadRecords(List<MangaReadRecord> records) async {
+    final prefs = await SharedPreferences.getInstance();
+    final recordsMap = <String, dynamic>{};
+    for (final record in records) {
+      recordsMap[record.shelfKey] = record.toJson();
+    }
+    await prefs.setString(_mangaReadRecordsKey, jsonEncode(recordsMap));
+  }
+
+  /// 获取漫画阅读记录，按保存时间降序
+  static Future<List<MangaReadRecord>> getMangaReadRecords() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonString = prefs.getString(_mangaReadRecordsKey);
+    if (jsonString == null || jsonString.isEmpty) {
+      return [];
+    }
+
+    try {
+      final recordsMap = jsonDecode(jsonString) as Map<String, dynamic>;
+      final records = recordsMap.values
+          .whereType<Map>()
+          .map((item) => MangaReadRecord.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
+      records.sort((a, b) => b.saveTime.compareTo(a.saveTime));
+      return records;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /// 添加或更新单条漫画阅读记录
+  static Future<void> saveMangaReadRecord(MangaReadRecord record) async {
+    final records = await getMangaReadRecords();
+    records.removeWhere((item) => item.shelfKey == record.shelfKey);
+    records.insert(0, record);
+    await saveMangaReadRecords(records);
+  }
+
+  /// 按书架 key（sourceId+mangaId）读取一条漫画进度
+  static Future<MangaReadRecord?> getMangaReadRecord(String shelfKey) async {
+    final records = await getMangaReadRecords();
+    for (final record in records) {
+      if (record.shelfKey == shelfKey) {
+        return record;
+      }
+    }
+    return null;
+  }
+
+  /// 清除所有漫画阅读记录
+  static Future<void> clearMangaReadRecords() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_mangaReadRecordsKey);
+  }
+
   // ==================== 清除所有本地模式数据 ====================
 
   /// 清除所有本地模式数据
@@ -331,5 +391,6 @@ class LocalModeStorageService {
     await clearPlayRecords();
     await clearFavorites();
     await clearSearchHistory();
+    await clearMangaReadRecords();
   }
 }
