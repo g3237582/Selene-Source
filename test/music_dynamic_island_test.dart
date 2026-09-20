@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:selene/widgets/music_dynamic_island.dart';
 
@@ -39,5 +40,21 @@ void main() {
       shouldShowMusicIsland(hasCurrentTrack: false, isOnFullPlayerRoute: false),
       isFalse,
     );
+  });
+
+  testWidgets('collapsed island shows cover and ring when track present',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: MusicDynamicIsland(
+            debugForceVisible: true,
+            debugProgress: 0.25,
+          ),
+        ),
+      ),
+    );
+    expect(find.byKey(const Key('music_dynamic_island')), findsOneWidget);
+    expect(find.byKey(const Key('music_dynamic_island_ring')), findsOneWidget);
   });
 }
