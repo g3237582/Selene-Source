@@ -1,8 +1,12 @@
 # Selene Dynamic Island Implementation Plan
 
+> **已废止（superseded）。** 应用内顶部 Dynamic Island 不再是产品方案。  
+> 意图 UX 是系统 MediaSession：`MusicMediaSession` + `MusicAudioHandler` + `audio_service` 通知栏 / 锁屏控件，以及底部 `MusicMiniPlayer`。  
+> 本计划仅作 PR #9 的历史实现记录，不要再按下文挂载 `MusicDynamicIsland`。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a top floating music Dynamic Island (收起环进度胶囊 / 展开播放控件) that coexists with the bottom mini player and lock-screen media card.
+**Goal:** ~~Add a top floating music Dynamic Island (收起环进度胶囊 / 展开播放控件) that coexists with the bottom mini player and lock-screen media card.~~ **Superseded:** do not ship an in-app island.
 
 **Architecture:** Pure in-app overlay widget driven by `MusicPlayerService` + `player.stream.position`. Mount inside `MainLayout`'s existing `Stack` as a top `Positioned` layer. Hide when the current route is `MusicPlayerScreen`. Do not change audio_service lock-screen behavior.
 

@@ -8,7 +8,6 @@ import '../services/theme_service.dart';
 import '../services/api_service.dart';
 import '../utils/device_utils.dart';
 import '../utils/font_utils.dart';
-import 'music_dynamic_island.dart';
 import 'music_mini_player.dart';
 import 'user_menu.dart';
 import 'dart:io' show Platform;
@@ -346,25 +345,6 @@ class _MainLayoutState extends State<MainLayout> {
                         ],
                       ),
                   ],
-                ),
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: SafeArea(
-                    bottom: false,
-                    child: Padding(
-                      padding: EdgeInsets.only(
-                        top: Platform.isWindows
-                            ? 40
-                            : DeviceUtils.isMacOS()
-                                ? 32
-                                : 0,
-                      ),
-                      child: const MusicDynamicIsland(),
-                    ),
-                  ),
                 ),
                 // 用户菜单覆盖层 - 现在会覆盖整个屏幕包括navbar
                 if (_showUserMenu)

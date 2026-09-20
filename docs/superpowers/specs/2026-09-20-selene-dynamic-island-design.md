@@ -1,8 +1,23 @@
 # Selene 音乐灵动岛设计
 
+> **已废止（superseded）。** 用户确认「灵动岛」指**系统**媒体通知与锁屏控件，不是应用内顶部胶囊。  
+> 产品意图 UX：保留底部 `MusicMiniPlayer` + `MusicMediaSession` / `audio_service` 通知栏与锁屏卡片；不再挂载应用内 `MusicDynamicIsland`。  
+> 下文保留为 PR #9 的历史设计记录，不再作为实现依据。
+
 日期：2026-09-20  
 仓库：https://github.com/g3237582/Selene-Source  
-状态：已在 PR https://github.com/g3237582/Selene-Source/pull/9 实现（未合并、未发版）
+状态：~~已在 PR https://github.com/g3237582/Selene-Source/pull/9 实现~~ → 应用内顶部岛已移除；系统 MediaSession 路径保留
+
+当前产品播放控件：
+
+```
+MusicPlayerService (唯一播放真相)
+    ├── MusicMiniPlayer（底部，保留）
+    ├── audio_service / MusicMediaSession 锁屏与通知栏（保留，播放时初始化）
+    └── MusicPlayerScreen（全屏页）
+```
+
+不再挂载应用内顶部 `MusicDynamicIsland`。`MusicPlayerRouteTracker` 仅用于在全屏页隐藏该岛，已一并删除。
 
 ## 背景
 
