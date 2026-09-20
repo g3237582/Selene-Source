@@ -17,7 +17,13 @@ class MusicPlayerService extends ChangeNotifier {
     });
   }
 
-  static final MusicPlayerService instance = MusicPlayerService._();
+  /// Created on first access so media_kit can be initialized in `main()`.
+  static MusicPlayerService? _instance;
+  static MusicPlayerService get instance =>
+      _instance ??= MusicPlayerService._();
+
+  /// Hook for lock-screen / notification permission when a session starts.
+  static Future<void> Function()? onActiveSession;
 
   final Player player = Player();
 
@@ -49,6 +55,7 @@ class MusicPlayerService extends ChangeNotifier {
     errorMessage = '';
     current = track;
     notifyListeners();
+    await onActiveSession?.call();
 
     try {
       final result = await MusicService.play(track);
@@ -74,9 +81,38 @@ class MusicPlayerService extends ChangeNotifier {
     await playTrack(tracks[start], playlist: tracks);
   }
 
+  Future<void> play() async {
+    if (current == null) return;
+    await player.play();
+  }
+
+  Future<void> pause() async {
+    await player.pause();
+  }
+
   Future<void> togglePlay() async {
     if (current == null) return;
     await player.playOrPause();
+  }
+
+  Future<void> seek(Duration position) async {
+    await player.seek(position);
+  }
+
+  Future<void> stopAndClear() async {
+    try {
+      await player.stop();
+    } catch (error) {
+      debugPrint('MusicPlayerService.stopAndClear: $error');
+    }
+    current = null;
+    queue = const [];
+    queueIndex = -1;
+    playing = false;
+    loading = false;
+    lyric = '';
+    errorMessage = '';
+    notifyListeners();
   }
 
   Future<void> playNext() async {

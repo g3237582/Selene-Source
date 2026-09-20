@@ -45,6 +45,10 @@
 -keep class com.alexmercerind.**.MediaKitPlugin { *; }
 -dontwarn com.alexmercerind.**
 
+# audio_service 锁屏 / 通知栏 MediaSession
+-keep class com.ryanheise.audioservice.** { *; }
+-dontwarn com.ryanheise.audioservice.**
+
 # =========================
 # Network (最小化)
 # =========================
