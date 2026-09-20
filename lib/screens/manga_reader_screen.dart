@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../manga/manga_progress.dart';
 import '../models/manga.dart';
 import '../services/manga_service.dart';
 import '../utils/remote_error.dart';
@@ -83,12 +84,14 @@ class MangaReaderScreen extends StatefulWidget {
   final MangaItem manga;
   final List<MangaChapter> chapters;
   final MangaChapter initialChapter;
+  final int initialPageIndex;
 
   const MangaReaderScreen({
     super.key,
     required this.manga,
     required this.chapters,
     required this.initialChapter,
+    this.initialPageIndex = 0,
   });
 
   @override
@@ -111,17 +114,32 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
     super.initState();
     _chapter = widget.initialChapter;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    _loadPages();
+    _loadPages(resumePage: widget.initialPageIndex);
   }
 
   @override
   void dispose() {
+    _persistProgress();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _pageController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadPages({bool openAtEnd = false}) async {
+  Future<void> _persistProgress() async {
+    if (_pages.isEmpty) {
+      return;
+    }
+    try {
+      await MangaService.saveHistory(
+        manga: widget.manga,
+        chapter: _chapter,
+        pageIndex: _pageIndex,
+        pageCount: _pages.length,
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _loadPages({bool openAtEnd = false, int? resumePage}) async {
     setState(() {
       _loading = true;
       _error = null;
@@ -133,7 +151,12 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
       if (!mounted) return;
       final target = pages.isEmpty
           ? 0
-          : (openAtEnd ? pages.length - 1 : 0);
+          : openAtEnd
+              ? pages.length - 1
+              : clampMangaPageIndex(
+                  pageIndex: resumePage ?? 0,
+                  pageCount: pages.length,
+                );
       setState(() {
         _pages = pages;
         _loading = false;
@@ -162,12 +185,14 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
 
   Future<void> _onPageChanged(int index) async {
     setState(() => _pageIndex = index);
-    await MangaService.saveHistory(
-      manga: widget.manga,
-      chapter: _chapter,
-      pageIndex: index,
-      pageCount: _pages.length,
-    );
+    try {
+      await MangaService.saveHistory(
+        manga: widget.manga,
+        chapter: _chapter,
+        pageIndex: index,
+        pageCount: _pages.length,
+      );
+    } catch (_) {}
   }
 
   void _switchChapter(int offset, {bool openAtEnd = false}) {
