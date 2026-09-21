@@ -49,7 +49,7 @@ BookItem mergeBookDetail(BookItem remote, BookItem local) {
     sourceId: firstNonEmptyString([remote.sourceId, local.sourceId]),
     sourceName: firstNonEmptyString([remote.sourceName, local.sourceName]),
     sourceType: firstNonEmptyString([remote.sourceType, local.sourceType]),
-    title: firstNonEmptyString([remote.title, local.title]),
+    title: preferredBookTitle([remote.title, local.title]),
     author: firstNonEmptyString([remote.author, local.author]),
     cover: firstNonEmptyString([remote.cover, local.cover]),
     summary: firstNonEmptyString([remote.summary, local.summary]),
@@ -82,12 +82,25 @@ String bookEmptyChaptersMessage(BookItem book) {
   return '该书没有章节资源';
 }
 
+final _upstreamHttpStatus = RegExp(r'请求失败\s*[:：]\s*(\d{3})');
+
 String bookChaptersErrorMessage(Object error, BookItem book) {
   if (isLegadoSourceMissingError(error)) {
     if (isFileStyleBook(book)) {
       return bookEmptyChaptersMessage(book);
     }
     return '当前书源不是可用的章节型 Legado 源，无法拉取目录。请换一个书源，或检查后台书源配置。';
+  }
+  final status = _upstreamHttpStatus.firstMatch(error.toString())?.group(1);
+  if (status == '403') {
+    final source = book.sourceName.isEmpty ? '该书源' : '「${book.sourceName}」';
+    return '源站拒绝了章节目录请求（403）。$source 可能需要登录、Cookie 或更新请求头，请换一个书源或检查后台书源规则。';
+  }
+  if (status == '404') {
+    return '源站没有找到章节目录（404）。请换一个书源试试。';
+  }
+  if (status != null) {
+    return '源站返回 $status，暂时无法拉取章节。请换一个书源或稍后重试。';
   }
   return error.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
 }

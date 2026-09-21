@@ -232,4 +232,64 @@ void main() {
       );
     });
   });
+
+  group('猫眼看书 / 活着 title + 403', () {
+    const maoyanCard = {
+      'id': 'huozhe',
+      'name': '活着',
+      'author': '余华',
+      'sourceId': 'maoyan',
+      'sourceName': '猫眼看书',
+      'type': 'legado',
+      'summary': '地主少爷福贵嗜赌成性，终于赌光了家业一贫如洗。',
+      'cover': 'https://cdn.example/huozhe.jpg',
+      'detailHref': 'https://www.maoyan.com/book/huozhe',
+    };
+
+    test('list cards that only send name keep 活着 instead of 未命名电子书', () {
+      final item = BookItem.fromJson(maoyanCard);
+
+      expect(item.title, '活着');
+      expect(item.author, '余华');
+      expect(item.sourceName, '猫眼看书');
+      expect(item.sourceType, 'legado');
+      expect(bookDetailRequest(item)['title'], '活着');
+      expect(isPlaceholderBookTitle(item.title), isFalse);
+    });
+
+    test('placeholder detail title does not overwrite the card title', () {
+      final local = BookItem.fromJson(maoyanCard);
+      final remote = BookItem.fromJson(const {
+        'id': 'huozhe',
+        'title': '未命名电子书',
+        'author': '余华',
+        'sourceId': 'maoyan',
+        'sourceName': '猫眼看书',
+        'summary': '地主少爷福贵嗜赌成性，终于赌光了家业一贫如洗。',
+        'detailHref': 'https://www.maoyan.com/book/huozhe',
+      });
+
+      final merged = mergeBookDetail(remote, local);
+      expect(merged.title, '活着');
+      expect(merged.author, '余华');
+      expect(merged.summary, contains('福贵'));
+    });
+
+    test('source-site 403 is explained instead of raw 请求失败:403', () {
+      final item = BookItem.fromJson(maoyanCard);
+      expect(shouldFetchBookChapters(item), isTrue);
+      expect(
+        bookChaptersErrorMessage(Exception('请求失败:403'), item),
+        contains('源站拒绝了章节目录请求'),
+      );
+      expect(
+        bookChaptersErrorMessage(Exception('请求失败:403'), item),
+        contains('猫眼看书'),
+      );
+      expect(
+        bookChaptersErrorMessage(Exception('请求失败:403'), item),
+        isNot(contains('请求失败:403')),
+      );
+    });
+  });
 }

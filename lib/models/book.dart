@@ -70,7 +70,7 @@ class BookItem {
       sourceId: firstNonEmptyString([json['sourceId']]),
       sourceName: firstNonEmptyString([json['sourceName']]),
       sourceType: _sourceTypeFromJson(json),
-      title: firstNonEmptyString([json['title']]),
+      title: preferredBookTitle([json['title'], json['name']]),
       author: firstNonEmptyString([json['author']]),
       cover: firstNonEmptyString([json['cover']]),
       summary: firstNonEmptyString([json['summary']]),
@@ -127,6 +127,33 @@ class BookItem {
       format: format,
     );
   }
+}
+
+bool isPlaceholderBookTitle(String? title) {
+  final text = title?.trim() ?? '';
+  if (text.isEmpty) {
+    return true;
+  }
+  return text == '未命名电子书' ||
+      text == '未命名' ||
+      text.toLowerCase() == 'untitled';
+}
+
+String preferredBookTitle(Iterable<Object?> values) {
+  var placeholder = '';
+  for (final value in values) {
+    final text = firstNonEmptyString([value]);
+    if (text.isEmpty) {
+      continue;
+    }
+    if (!isPlaceholderBookTitle(text)) {
+      return text;
+    }
+    if (placeholder.isEmpty) {
+      placeholder = text;
+    }
+  }
+  return placeholder;
 }
 
 String _sourceTypeFromJson(Map<String, dynamic> json) {
