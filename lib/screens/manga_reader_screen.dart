@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -8,6 +10,27 @@ import '../utils/remote_error.dart';
 import '../widgets/authenticated_image.dart';
 
 enum MangaReaderTapZone { previous, chrome, next }
+
+class MangaReaderKeys {
+  static const pageViewport = Key('manga-reader-page-viewport');
+}
+
+/// Status-bar / home-indicator inset that still works in immersive mode.
+///
+/// `SystemUiMode.immersiveSticky` zeros [MediaQuery.padding] while the cutout
+/// and system bars remain in [MediaQuery.viewPadding]. Taking the max keeps
+/// chrome and page pixels out from under the status bar in both modes.
+EdgeInsets mangaReaderSafeInset({
+  required EdgeInsets padding,
+  required EdgeInsets viewPadding,
+}) {
+  return EdgeInsets.only(
+    top: math.max(padding.top, viewPadding.top),
+    bottom: math.max(padding.bottom, viewPadding.bottom),
+    left: math.max(padding.left, viewPadding.left),
+    right: math.max(padding.right, viewPadding.right),
+  );
+}
 
 class MangaReaderTurn {
   final int? pageIndex;
@@ -282,52 +305,70 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final inset = mangaReaderSafeInset(
+      padding: MediaQuery.paddingOf(context),
+      viewPadding: MediaQuery.viewPaddingOf(context),
+    );
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          if (_loading)
-            const Center(child: CircularProgressIndicator())
-          else if (_error != null)
-            Center(
-              child: Text(_error!, style: const TextStyle(color: Colors.white70)),
-            )
-          else
-            NotificationListener<ScrollNotification>(
-              onNotification: _onScrollNotification,
-              child: Listener(
-                behavior: HitTestBehavior.translucent,
-                onPointerDown: _onPointerDown,
-                onPointerUp: _onPointerUp,
-                onPointerCancel: (_) => _pointerDown = null,
-                child: PageView.builder(
-                  controller: _pageController,
-                  scrollDirection: Axis.horizontal,
-                  onPageChanged: _onPageChanged,
-                  itemCount: _pages.length,
-                  itemBuilder: (context, index) {
-                    return LayoutBuilder(
-                      builder: (context, constraints) {
-                        return SingleChildScrollView(
-                          physics: const BouncingScrollPhysics(),
-                          child: AuthenticatedImage(
-                            url: _pages[index],
-                            fit: BoxFit.fitWidth,
-                            alignment: Alignment.topCenter,
-                            width: constraints.maxWidth,
+          // Listener stays full-screen so left/center/right tap zones are
+          // unchanged. Visual content is inset so the first page pixels are
+          // not drawn under the status bar or home indicator.
+          Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: _onPointerDown,
+            onPointerUp: _onPointerUp,
+            onPointerCancel: (_) => _pointerDown = null,
+            child: Padding(
+              key: MangaReaderKeys.pageViewport,
+              padding: inset,
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                      ? Center(
+                          child: Text(
+                            _error!,
+                            style: const TextStyle(color: Colors.white70),
                           ),
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
+                        )
+                      : NotificationListener<ScrollNotification>(
+                          onNotification: _onScrollNotification,
+                          child: PageView.builder(
+                            controller: _pageController,
+                            scrollDirection: Axis.horizontal,
+                            onPageChanged: _onPageChanged,
+                            itemCount: _pages.length,
+                            itemBuilder: (context, index) {
+                              return LayoutBuilder(
+                                builder: (context, constraints) {
+                                  return SingleChildScrollView(
+                                    physics: const BouncingScrollPhysics(),
+                                    child: AuthenticatedImage(
+                                      url: _pages[index],
+                                      fit: BoxFit.fitWidth,
+                                      alignment: Alignment.topCenter,
+                                      width: constraints.maxWidth,
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                        ),
             ),
+          ),
           if (_showChrome)
-            SafeArea(
-              child: Column(
-                children: [
-                  Container(
+            Column(
+              children: [
+                Container(height: inset.top, color: Colors.black54),
+                Padding(
+                  padding: EdgeInsets.only(
+                    left: inset.left,
+                    right: inset.right,
+                  ),
+                  child: Container(
                     color: Colors.black54,
                     child: Row(
                       children: [
@@ -353,8 +394,8 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                       ],
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
         ],
       ),
