@@ -21,6 +21,7 @@ class ApiResponse<T> {
   final String? message;
   final int? statusCode;
   final Map<String, dynamic>? action;
+  final Map<String, dynamic>? errorData;
 
   ApiResponse({
     required this.success,
@@ -28,6 +29,7 @@ class ApiResponse<T> {
     this.message,
     this.statusCode,
     this.action,
+    this.errorData,
   });
 
   factory ApiResponse.success(T data, {int? statusCode}) {
@@ -42,12 +44,14 @@ class ApiResponse<T> {
     String message, {
     int? statusCode,
     Map<String, dynamic>? action,
+    Map<String, dynamic>? errorData,
   }) {
     return ApiResponse<T>(
       success: false,
       message: message,
       statusCode: statusCode,
       action: action,
+      errorData: errorData,
     );
   }
 }
@@ -173,16 +177,26 @@ class ApiService {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       String errorMessage = '请求失败';
       try {
-        final errorData = json.decode(response.body);
+        final decoded = json.decode(response.body);
+        if (decoded is! Map) {
+          throw const FormatException('error body is not an object');
+        }
+        final errorMap = Map<String, dynamic>.from(decoded);
         errorMessage =
-            errorData['message'] ?? errorData['error'] ?? errorMessage;
-        if (errorData['action'] is Map) {
+            errorMap['message'] ?? errorMap['error'] ?? errorMessage;
+        if (errorMap['action'] is Map) {
           return ApiResponse.error(
             errorMessage.toString(),
             statusCode: response.statusCode,
-            action: Map<String, dynamic>.from(errorData['action'] as Map),
+            action: Map<String, dynamic>.from(errorMap['action'] as Map),
+            errorData: errorMap,
           );
         }
+        return ApiResponse.error(
+          errorMessage.toString(),
+          statusCode: response.statusCode,
+          errorData: errorMap,
+        );
       } catch (e) {
         // 如果解析失败，使用默认错误信息
         switch (response.statusCode) {

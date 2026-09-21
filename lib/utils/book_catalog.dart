@@ -1,4 +1,5 @@
 import '../models/book.dart';
+import '../models/book_file.dart';
 
 bool isReadableBookItem(BookItem item) {
   return isBookDetailHref(item.detailHref) || isBookDetailHref(item.id);
@@ -58,6 +59,10 @@ BookItem mergeBookDetail(BookItem remote, BookItem local) {
       [remote.format, local.format],
       fallback: 'chapters',
     ),
+    acquisitionHref: firstNonEmptyString([
+      remote.acquisitionHref,
+      local.acquisitionHref,
+    ]),
   );
 }
 
@@ -69,7 +74,11 @@ bool isFileStyleBook(BookItem book) {
   return book.sourceType.toLowerCase() == 'opds';
 }
 
-bool shouldFetchBookChapters(BookItem book) => !isFileStyleBook(book);
+bool shouldFetchBookChapters(BookItem book) {
+  // Always probe /api/books/read/chapters. OPDS/EPUB sources now return
+  // 422 + acquisition/manifest hints instead of a Legado lookup failure.
+  return book.sourceId.isNotEmpty || resolveBookDetailLocator(book).isNotEmpty;
+}
 
 bool isLegadoSourceMissingError(Object error) {
   return error.toString().contains('未找到对应的 Legado 书源');
@@ -77,14 +86,23 @@ bool isLegadoSourceMissingError(Object error) {
 
 String bookEmptyChaptersMessage(BookItem book) {
   if (isFileStyleBook(book)) {
-    return '该书暂不支持章节阅读。EPUB 文件流会在后续版本接入。';
+    return '这是整本 EPUB/PDF 电子书。打开后将通过文件接口阅读。';
   }
   return '该书没有章节资源';
+}
+
+String bookFileBookMessage(BookItem book, {String format = ''}) {
+  final resolved = (format.isNotEmpty ? format : book.format).toUpperCase();
+  final label = resolved == 'PDF' ? 'PDF' : 'EPUB';
+  return '这是整本 $label 电子书，章节目录不适用。请直接阅读或下载文件。';
 }
 
 final _upstreamHttpStatus = RegExp(r'请求失败\s*[:：]\s*(\d{3})');
 
 String bookChaptersErrorMessage(Object error, BookItem book) {
+  if (error is BookChaptersNotApplicableException) {
+    return bookFileBookMessage(book, format: error.payload.format);
+  }
   if (isLegadoSourceMissingError(error)) {
     if (isFileStyleBook(book)) {
       return bookEmptyChaptersMessage(book);
@@ -92,6 +110,9 @@ String bookChaptersErrorMessage(Object error, BookItem book) {
     return '当前书源不是可用的章节型 Legado 源，无法拉取目录。请换一个书源，或检查后台书源配置。';
   }
   final status = _upstreamHttpStatus.firstMatch(error.toString())?.group(1);
+  if (status == '422') {
+    return bookFileBookMessage(book);
+  }
   if (status == '403') {
     final source = book.sourceName.isEmpty ? '该书源' : '「${book.sourceName}」';
     return '源站拒绝了章节目录请求（403）。$source 可能需要登录、Cookie 或更新请求头，请换一个书源或检查后台书源规则。';

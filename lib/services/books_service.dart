@@ -1,4 +1,5 @@
 import '../models/book.dart';
+import '../models/book_file.dart';
 import '../search/all_source_search.dart';
 import '../utils/book_catalog.dart';
 import '../utils/json_records.dart';
@@ -269,6 +270,13 @@ class BooksService {
       queryParameters: bookChaptersQuery(book),
       fromJson: (data) => Map<String, dynamic>.from(data as Map),
     );
+    final notApplicable = BookChaptersNotApplicable.tryParse(
+      response.errorData ?? response.data,
+      statusCode: response.statusCode,
+    );
+    if (notApplicable != null) {
+      throw BookChaptersNotApplicableException(notApplicable);
+    }
     if (!response.success || response.data == null) {
       throw Exception(response.message ?? '获取章节目录失败');
     }
@@ -352,7 +360,7 @@ class BooksService {
           'title': book.title,
           'author': book.author,
           'cover': book.cover,
-          'format': 'chapters',
+          'format': book.format.isEmpty ? 'chapters' : book.format,
           'detailHref': book.detailHref,
           'locator': {
             'type': 'chapter',

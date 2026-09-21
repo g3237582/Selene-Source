@@ -38,6 +38,7 @@ class BookItem {
   final String summary;
   final String detailHref;
   final String format;
+  final String acquisitionHref;
 
   const BookItem({
     required this.id,
@@ -50,6 +51,7 @@ class BookItem {
     this.summary = '',
     this.detailHref = '',
     this.format = 'chapters',
+    this.acquisitionHref = '',
   });
 
   factory BookItem.fromJson(Map<String, dynamic> json) {
@@ -79,6 +81,10 @@ class BookItem {
         [json['format'], acquisition.format],
         fallback: 'chapters',
       ),
+      acquisitionHref: firstNonEmptyString([
+        json['acquisitionHref'],
+        acquisition.href,
+      ]),
     );
   }
 
@@ -114,17 +120,38 @@ class BookItem {
         resolvedType == sourceType) {
       return this;
     }
-    return BookItem(
-      id: id,
+    return copyWith(
       sourceId: resolvedId,
       sourceName: resolvedName,
       sourceType: resolvedType,
-      title: title,
-      author: author,
-      cover: cover,
-      summary: summary,
-      detailHref: detailHref,
-      format: format,
+    );
+  }
+
+  BookItem copyWith({
+    String? id,
+    String? sourceId,
+    String? sourceName,
+    String? sourceType,
+    String? title,
+    String? author,
+    String? cover,
+    String? summary,
+    String? detailHref,
+    String? format,
+    String? acquisitionHref,
+  }) {
+    return BookItem(
+      id: id ?? this.id,
+      sourceId: sourceId ?? this.sourceId,
+      sourceName: sourceName ?? this.sourceName,
+      sourceType: sourceType ?? this.sourceType,
+      title: title ?? this.title,
+      author: author ?? this.author,
+      cover: cover ?? this.cover,
+      summary: summary ?? this.summary,
+      detailHref: detailHref ?? this.detailHref,
+      format: format ?? this.format,
+      acquisitionHref: acquisitionHref ?? this.acquisitionHref,
     );
   }
 }

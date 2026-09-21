@@ -105,7 +105,7 @@ void main() {
       );
     });
 
-    test('epub books keep the upcoming-file-stream copy', () {
+    test('epub books explain they are whole-file reads', () {
       expect(
         bookEmptyChaptersMessage(
           const BookItem(
@@ -116,7 +116,7 @@ void main() {
             format: 'epub',
           ),
         ),
-        '该书暂不支持章节阅读。EPUB 文件流会在后续版本接入。',
+        contains('整本 EPUB/PDF'),
       );
     });
   });
@@ -149,14 +149,16 @@ void main() {
       expect(item.sourceName, '古腾堡中文');
       expect(item.format, 'epub');
       expect(item.detailHref, 'https://www.gutenberg.org/ebooks/25329.opds');
-      expect(shouldFetchBookChapters(item), isFalse);
+      expect(item.acquisitionHref, 'https://www.gutenberg.org/ebooks/25329.epub.images');
+      expect(isFileStyleBook(item), isTrue);
+      expect(shouldFetchBookChapters(item), isTrue);
       expect(
         bookEmptyChaptersMessage(item),
-        '该书暂不支持章节阅读。EPUB 文件流会在后续版本接入。',
+        contains('整本 EPUB/PDF'),
       );
     });
 
-    test('all-source recommend copies OPDS type so chapters are not requested', () {
+    test('all-source recommend copies OPDS type so 422 file hints can be used', () {
       final unlabeled = BookItem.fromJson(const {
         'id': '25329',
         'title': '朝花夕拾',
@@ -178,10 +180,11 @@ void main() {
       expect(labeled.sourceId, 'gutenberg-zh');
       expect(labeled.sourceName, '古腾堡中文');
       expect(labeled.sourceType, 'opds');
-      expect(shouldFetchBookChapters(labeled), isFalse);
+      expect(isFileStyleBook(labeled), isTrue);
+      expect(shouldFetchBookChapters(labeled), isTrue);
       expect(
         bookEmptyChaptersMessage(labeled),
-        '该书暂不支持章节阅读。EPUB 文件流会在后续版本接入。',
+        contains('整本 EPUB/PDF'),
       );
     });
 
@@ -192,7 +195,7 @@ void main() {
           Exception('未找到对应的 Legado 书源'),
           item,
         ),
-        '该书暂不支持章节阅读。EPUB 文件流会在后续版本接入。',
+        contains('整本 EPUB/PDF'),
       );
     });
 
@@ -211,7 +214,9 @@ void main() {
       final merged = mergeBookDetail(remote, local);
       expect(merged.sourceType, 'opds');
       expect(merged.format, 'epub');
-      expect(shouldFetchBookChapters(merged), isFalse);
+      expect(merged.acquisitionHref, contains('.epub.images'));
+      expect(isFileStyleBook(merged), isTrue);
+      expect(shouldFetchBookChapters(merged), isTrue);
     });
 
     test('true Legado chapter books still request the chapters API', () {
