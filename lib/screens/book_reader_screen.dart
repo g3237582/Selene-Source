@@ -11,12 +11,14 @@ class BookReaderScreen extends StatefulWidget {
   final BookItem book;
   final List<BookChapter> chapters;
   final BookChapter initialChapter;
+  final Map<String, String> localContents;
 
   const BookReaderScreen({
     super.key,
     required this.book,
     required this.chapters,
     required this.initialChapter,
+    this.localContents = const {},
   });
 
   @override
@@ -43,14 +45,17 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
       _error = null;
     });
     try {
-      final chapter = await BooksService.getChapter(
-        book: widget.book,
-        chapter: _chapter,
-      );
+      final local = widget.localContents[_chapter.href];
+      final content = local ??
+          (await BooksService.getChapter(
+            book: widget.book,
+            chapter: _chapter,
+          ))
+              .content;
       await BooksService.saveHistory(book: widget.book, chapter: _chapter);
       if (!mounted) return;
       setState(() {
-        _content = stripHtml(chapter.content);
+        _content = stripHtml(content);
         _loading = false;
       });
     } catch (error) {
