@@ -74,7 +74,7 @@ void main() {
     );
   });
 
-  testWidgets('page viewport uses the view padding as a deliberate inset',
+  testWidgets('page viewport insets below the chrome bar and above the home indicator',
       (tester) async {
     await tester.pumpWidget(_readerApp());
     await tester.pump();
@@ -82,7 +82,10 @@ void main() {
     final padding = tester.widget<Padding>(
       find.byKey(MangaReaderKeys.pageViewport),
     );
-    expect(padding.padding, const EdgeInsets.only(top: 47, bottom: 34));
+    expect(
+      padding.padding,
+      const EdgeInsets.only(top: 47 + mangaReaderChromeBarHeight, bottom: 34),
+    );
   });
 
   testWidgets('chrome also respects a normal (non-immersive) top padding',

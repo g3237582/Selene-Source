@@ -13,7 +13,14 @@ enum MangaReaderTapZone { previous, chrome, next }
 
 class MangaReaderKeys {
   static const pageViewport = Key('manga-reader-page-viewport');
+  static const chromeBar = Key('manga-reader-chrome-bar');
 }
+
+/// Height of the top control row (close / title / prev / next).
+///
+/// The page display rect starts at the bottom of this band so manga pixels
+/// never draw under the buttons.
+const double mangaReaderChromeBarHeight = 48;
 
 /// Status-bar / home-indicator inset that still works in immersive mode.
 ///
@@ -30,6 +37,56 @@ EdgeInsets mangaReaderSafeInset({
     left: math.max(padding.left, viewPadding.left),
     right: math.max(padding.right, viewPadding.right),
   );
+}
+
+/// Content display rect: safe insets plus the reserved top chrome bar.
+///
+/// Short pages center in this rect. Tall pages pin to its top edge and
+/// scroll inside it, so they never enter the button region.
+EdgeInsets mangaReaderContentInset({
+  required EdgeInsets safeInset,
+  double chromeBarHeight = mangaReaderChromeBarHeight,
+}) {
+  return EdgeInsets.only(
+    top: safeInset.top + chromeBarHeight,
+    bottom: safeInset.bottom,
+    left: safeInset.left,
+    right: safeInset.right,
+  );
+}
+
+/// Vertical offset of a fitted page inside the content display rect.
+double mangaReaderPageTopOffset({
+  required double pageHeight,
+  required double displayHeight,
+}) {
+  if (pageHeight <= 0 || displayHeight <= 0 || pageHeight >= displayHeight) {
+    return 0;
+  }
+  return (displayHeight - pageHeight) / 2;
+}
+
+/// Scrollable page host: center when shorter than the viewport, pin to top
+/// and scroll when taller.
+class MangaReaderPageScroller extends StatelessWidget {
+  final Widget child;
+
+  const MangaReaderPageScroller({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Center(child: child),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class MangaReaderTurn {
@@ -309,13 +366,14 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
       padding: MediaQuery.paddingOf(context),
       viewPadding: MediaQuery.viewPaddingOf(context),
     );
+    final contentInset = mangaReaderContentInset(safeInset: inset);
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
           // Listener stays full-screen so left/center/right tap zones are
-          // unchanged. Visual content is inset so the first page pixels are
-          // not drawn under the status bar or home indicator.
+          // unchanged. Visual pages use the content rect below the chrome
+          // bar (and inside safe insets) so they never draw under buttons.
           Listener(
             behavior: HitTestBehavior.translucent,
             onPointerDown: _onPointerDown,
@@ -323,7 +381,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
             onPointerCancel: (_) => _pointerDown = null,
             child: Padding(
               key: MangaReaderKeys.pageViewport,
-              padding: inset,
+              padding: contentInset,
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : _error != null
@@ -343,12 +401,11 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                             itemBuilder: (context, index) {
                               return LayoutBuilder(
                                 builder: (context, constraints) {
-                                  return SingleChildScrollView(
-                                    physics: const BouncingScrollPhysics(),
+                                  return MangaReaderPageScroller(
                                     child: AuthenticatedImage(
                                       url: _pages[index],
                                       fit: BoxFit.fitWidth,
-                                      alignment: Alignment.topCenter,
+                                      alignment: Alignment.center,
                                       width: constraints.maxWidth,
                                     ),
                                   );
@@ -369,6 +426,8 @@ class _MangaReaderScreenState extends State<MangaReaderScreen> {
                     right: inset.right,
                   ),
                   child: Container(
+                    key: MangaReaderKeys.chromeBar,
+                    height: mangaReaderChromeBarHeight,
                     color: Colors.black54,
                     child: Row(
                       children: [
