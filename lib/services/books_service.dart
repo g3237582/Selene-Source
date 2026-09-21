@@ -313,7 +313,15 @@ class BooksService {
     if (!response.success || response.data == null) {
       throw Exception(response.message ?? '获取章节内容失败');
     }
-    return BookChapterContent.fromJson(response.data!);
+    final parsed = BookChapterContent.fromJson(response.data!);
+    return BookChapterContent(
+      id: parsed.id.isEmpty ? chapter.id : parsed.id,
+      title: resolveChapterTitle(tocChapter: chapter, apiTitle: parsed.title),
+      href: parsed.href.isEmpty ? chapter.href : parsed.href,
+      content: parsed.content,
+      nextHref: parsed.nextHref,
+      previousHref: parsed.previousHref,
+    );
   }
 
   static Future<List<BookItem>> getShelf() async {

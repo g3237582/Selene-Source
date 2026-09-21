@@ -296,5 +296,18 @@ void main() {
         isNot(contains('请求失败:403')),
       );
     });
+
+    test('LunaTV 源站拒绝了目录抓取 is a source refusal, not a client scrape failure', () {
+      final item = BookItem.fromJson(maoyanCard);
+      final message = bookChaptersErrorMessage(
+        Exception('源站拒绝了目录抓取（可能需登录/Cookie/更新请求头）'),
+        item,
+      );
+      expect(message, contains('源站拒绝了章节目录请求'));
+      expect(message, contains('猫眼看书'));
+      expect(message, contains('客户端无法绕过'));
+      expect(message, contains('换一个可用书源'));
+      expect(message, isNot(contains('请求失败:403')));
+    });
   });
 }

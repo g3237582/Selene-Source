@@ -22,11 +22,30 @@ String resolveBookTocHref(BookItem book) {
 Map<String, String> bookChapterQuery(BookItem book, BookChapter chapter) {
   final href = chapter.href.trim();
   final tocHref = resolveBookTocHref(book);
+  final locator = resolveBookDetailLocator(book);
   return {
     'sourceId': book.sourceId,
+    // LunaTV requires the TOC chapter href (`legado-text:…` or a page URL).
+    // Never substitute chapter.id — that is not a fetchable locator.
     if (href.isNotEmpty) 'href': href,
+    if (locator.isNotEmpty) 'bookId': locator,
+    if (isBookDetailHref(locator)) 'bookUrl': locator,
     if (tocHref.isNotEmpty) 'tocHref': tocHref,
   };
+}
+
+bool isValidChapterBodyQuery(Map<String, String> query) {
+  return (query['sourceId'] ?? '').trim().isNotEmpty &&
+      (query['href'] ?? '').trim().isNotEmpty;
+}
+
+/// Prod often returns an empty chapter title; keep the TOC entry title.
+String resolveChapterTitle({
+  required BookChapter tocChapter,
+  String apiTitle = '',
+}) {
+  final title = preferredBookTitle([apiTitle, tocChapter.title]);
+  return title.isEmpty ? '正文' : title;
 }
 
 enum ChapterBodyKind { text, empty, challenge, audio, image }
@@ -112,9 +131,8 @@ String bookChapterErrorMessage(Object error, BookItem book) {
   if (status == '422') {
     return bookFileBookMessage(book);
   }
-  if (raw.contains('源站拒绝了正文') || status == '403') {
-    final source = book.sourceName.isEmpty ? '该书源' : '「${book.sourceName}」';
-    return '源站拒绝了章节正文请求（403）。$source 可能需要登录、Cookie 或更新请求头，请换一个书源或检查后台书源规则。';
+  if (isSourceSiteRefusal(error)) {
+    return bookSourceRefusalMessage(book, what: '章节正文请求');
   }
   if (status == '404') {
     return '源站没有找到章节正文（404）。请换一个书源试试。';

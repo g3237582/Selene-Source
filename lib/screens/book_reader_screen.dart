@@ -46,16 +46,27 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
     });
     try {
       final local = widget.localContents[_chapter.href];
-      final raw = local ??
-          (await BooksService.getChapter(
-            book: widget.book,
-            chapter: _chapter,
-          ))
-              .content;
+      final remote = local == null
+          ? await BooksService.getChapter(
+              book: widget.book,
+              chapter: _chapter,
+            )
+          : null;
+      final raw = local ?? remote!.content;
       await BooksService.saveHistory(book: widget.book, chapter: _chapter);
       if (!mounted) return;
       final view = inspectChapterBody(raw);
+      final title = resolveChapterTitle(
+        tocChapter: _chapter,
+        apiTitle: remote?.title ?? '',
+      );
       setState(() {
+        _chapter = BookChapter(
+          id: _chapter.id,
+          title: title,
+          href: _chapter.href,
+          order: _chapter.order,
+        );
         if (view.kind == ChapterBodyKind.text) {
           _content = view.displayText;
           _error = null;

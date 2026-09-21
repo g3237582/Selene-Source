@@ -22,14 +22,30 @@ void main() {
       order: 0,
     );
 
-    test('sends chapter href plus TOC acquisition as tocHref', () {
+    test('requires sourceId + TOC href, and also sends bookId/bookUrl', () {
       final query = bookChapterQuery(aixia, textChapter);
 
+      expect(isValidChapterBodyQuery(query), isTrue);
       expect(query['sourceId'], 'legado_d43d71625efe0dab');
       expect(query['href'], 'legado-text:a1b2c3d4e5f60789');
+      expect(query['href'], isNot(textChapter.id));
+      expect(query['bookId'], 'https://ixdzs8.com/read/117097/');
+      expect(query['bookUrl'], 'https://ixdzs8.com/read/117097/');
       expect(query['tocHref'], 'https://ixdzs8.com/read/117097/toc/');
       expect(query['tocHref'], isNot(aixia.detailHref));
-      expect(query.containsKey('bookUrl'), isFalse);
+    });
+
+    test('chapterId-only payload is not a valid body request', () {
+      final chapter = BookChapter.fromJson(const {
+        'id': 'ch-99',
+        'title': '前言',
+      });
+      final query = bookChapterQuery(aixia, chapter);
+
+      expect(chapter.href, isEmpty);
+      expect(query.containsKey('href'), isFalse);
+      expect(query['href'], isNot('ch-99'));
+      expect(isValidChapterBodyQuery(query), isFalse);
     });
 
     test('falls back to bookUrl/detailHref when detail has no TOC link', () {
@@ -180,6 +196,40 @@ void main() {
       expect(view.kind, ChapterBodyKind.empty);
       expect(view.message, '本章暂无正文');
     });
+
+    test('内容还在处理中 is shown as body text, not a blank error', () {
+      final view = inspectChapterBody('内容还在处理中');
+      expect(view.kind, ChapterBodyKind.text);
+      expect(view.displayText, '内容还在处理中');
+      expect(view.message, isEmpty);
+    });
+  });
+
+  group('chapter title fallback', () {
+    const toc = BookChapter(
+      id: 'ch-0',
+      title: '前言',
+      href: 'legado-text:a1b2c3d4e5f60789',
+    );
+
+    test('empty API title uses the TOC entry title', () {
+      expect(resolveChapterTitle(tocChapter: toc, apiTitle: ''), '前言');
+      expect(resolveChapterTitle(tocChapter: toc), '前言');
+    });
+
+    test('placeholder API title does not replace the TOC title', () {
+      expect(
+        resolveChapterTitle(tocChapter: toc, apiTitle: '未命名'),
+        '前言',
+      );
+    });
+
+    test('real API title wins over the TOC title', () {
+      expect(
+        resolveChapterTitle(tocChapter: toc, apiTitle: '序章'),
+        '序章',
+      );
+    });
   });
 
   group('chapter body errors', () {
@@ -208,6 +258,29 @@ void main() {
         bookChapterErrorMessage(Exception('请求失败:403'), aixia),
         contains('爱下电子书'),
       );
+      expect(
+        bookChapterErrorMessage(Exception('源站拒绝了正文抓取（可能需登录/Cookie/更新请求头）'), aixia),
+        contains('客户端无法绕过'),
+      );
+    });
+
+    test('猫眼看书 refusal copy does not imply Selene can scrape past 403', () {
+      const maoyan = BookItem(
+        id: 'https://www.maoyan.com/book/huozhe',
+        sourceId: 'maoyan',
+        sourceName: '猫眼看书',
+        sourceType: 'legado',
+        title: '活着',
+        detailHref: 'https://www.maoyan.com/book/huozhe',
+      );
+      final message = bookChapterErrorMessage(
+        Exception('源站拒绝了正文抓取（可能需登录/Cookie/更新请求头）'),
+        maoyan,
+      );
+      expect(message, contains('猫眼看书'));
+      expect(message, contains('源站拒绝'));
+      expect(message, contains('客户端无法绕过'));
+      expect(message, contains('换一个可用书源'));
     });
 
     test('maps OPDS 422 to the file-book path instead of a chapter failure', () {
