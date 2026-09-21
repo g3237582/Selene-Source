@@ -45,6 +45,7 @@ class BooksService {
     return results
         .whereType<Map>()
         .map((item) => BookItem.fromJson(Map<String, dynamic>.from(item)))
+        .map((item) => labelItem(item, _sourceHint(sourceId)))
         .toList();
   }
 
@@ -126,6 +127,21 @@ class BooksService {
     return homeCatalogResult(root: fetched.catalog);
   }
 
+  static BookSource? _sourceHint(String? sourceId, {String sourceName = ''}) {
+    if (sourceId == null || sourceId.isEmpty) {
+      return null;
+    }
+    return BookSource(id: sourceId, name: sourceName);
+  }
+
+  static BookItem labelItem(BookItem item, BookSource? source) {
+    return source == null ? item : item.withSource(source);
+  }
+
+  static List<BookItem> attachSource(List<BookItem> items, BookSource? source) {
+    return [for (final item in items) labelItem(item, source)];
+  }
+
   static Future<AllSourcePage<BookItem>> recommendAll({
     required List<BookSource> sources,
     Map<String, String> nextHrefs = const {},
@@ -139,14 +155,8 @@ class BooksService {
       onPartial: onPartial,
       fetch: (sourceId, cursor) async {
         final result = await homeCatalogPage(sourceId: sourceId, href: cursor);
-        final source = byId[sourceId];
-        if (source == null) {
-          return result;
-        }
         return PagedResult(
-          items: [
-            for (final item in result.items) item.withSource(source),
-          ],
+          items: attachSource(result.items, byId[sourceId]),
           hasMore: result.hasMore,
           nextToken: result.nextToken,
         );
@@ -159,14 +169,17 @@ class BooksService {
     required List<BookSource> sources,
     void Function(AllSourcePage<BookItem> partial)? onPartial,
   }) {
+    final searchable = searchableSources(sources);
+    final byId = {for (final source in searchable) source.id: source};
     return AllSourceSearch.fetch(
-      sourceIds: [
-        for (final source in searchableSources(sources)) source.id,
-      ],
+      sourceIds: [for (final source in searchable) source.id],
       onPartial: onPartial,
       search: (sourceId, _) async {
         final items = await search(query: query, sourceId: sourceId);
-        return PagedResult(items: items, hasMore: false);
+        return PagedResult(
+          items: attachSource(items, byId[sourceId]),
+          hasMore: false,
+        );
       },
     );
   }
@@ -189,6 +202,7 @@ class BooksService {
     final entries = (response.data!['entries'] as List? ?? [])
         .whereType<Map>()
         .map((item) => BookItem.fromJson(Map<String, dynamic>.from(item)))
+        .map((item) => labelItem(item, _sourceHint(sourceId)))
         .where(isReadableBookItem)
         .toList();
     final navigation = (response.data!['navigation'] as List? ?? [])
@@ -207,31 +221,19 @@ class BooksService {
   static Future<BookItem> getDetail(BookItem book) async {
     final response = await ApiService.post<Map<String, dynamic>>(
       '/api/books/detail',
-      body: {
-        'sourceId': book.sourceId,
-        'bookId': book.id,
-        'href': book.detailHref,
-        'title': book.title,
-        'author': book.author,
-        'cover': book.cover,
-        'summary': book.summary,
-      },
+      body: bookDetailRequest(book),
       fromJson: (data) => Map<String, dynamic>.from(data as Map),
     );
     if (!response.success || response.data == null) {
       throw Exception(response.message ?? '获取书籍详情失败');
     }
-    return BookItem.fromJson(response.data!);
+    return mergeBookDetail(BookItem.fromJson(response.data!), book);
   }
 
   static Future<List<BookChapter>> getChapters(BookItem book) async {
     final response = await ApiService.get<Map<String, dynamic>>(
       '/api/books/read/chapters',
-      queryParameters: {
-        'sourceId': book.sourceId,
-        'bookId': book.id,
-        if (book.detailHref.isNotEmpty) 'href': book.detailHref,
-      },
+      queryParameters: bookChaptersQuery(book),
       fromJson: (data) => Map<String, dynamic>.from(data as Map),
     );
     if (!response.success || response.data == null) {

@@ -39,6 +39,7 @@ void main() {
           sourceName: 'Wol.moe',
           title: '三体',
           author: '刘慈欣',
+          detailHref: 'https://opds.wol.moe/zh_CN/book/1',
         ),
       ],
       navigation: const [
@@ -50,6 +51,29 @@ void main() {
       ],
     );
     expect(href, isNull);
+  });
+
+  test('cover-only category cards do not block auto-opening a real catalog', () {
+    final href = resolveDefaultBookCatalogHref(
+      entries: const [
+        BookItem(
+          id: 'nav',
+          sourceId: 'legado-a',
+          sourceName: '书源A',
+          title: '玄幻',
+          cover: 'https://cdn.example/xuanhuan.png',
+          detailHref: 'legado-explore:abc',
+        ),
+      ],
+      navigation: const [
+        BookNavLink(
+          title: '最近更新',
+          href: 'legado-explore:latest',
+          rel: 'legado:explore',
+        ),
+      ],
+    );
+    expect(href, 'legado-explore:latest');
   });
 
   test('catalogSources keeps only sources that can browse a home feed', () {
@@ -75,7 +99,7 @@ void main() {
     );
   });
 
-  test('catalog entries without author or cover are hidden', () {
+  test('catalog entries without a book locator are hidden', () {
     expect(
       isReadableBookItem(
         const BookItem(
@@ -83,6 +107,8 @@ void main() {
           sourceId: 'wol-zh-cn',
           sourceName: 'Wol.moe',
           title: '反馈群组',
+          author: '站务',
+          cover: 'https://cdn.example/nav.png',
         ),
       ),
       isFalse,
