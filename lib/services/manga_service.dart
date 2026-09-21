@@ -57,6 +57,7 @@ class MangaService {
     required String query,
     required List<MangaSource> sources,
     Map<String, int> pages = const {},
+    void Function(AllSourcePage<MangaItem> partial)? onPartial,
   }) {
     return AllSourceSearch.fetch(
       sourceIds: [
@@ -64,6 +65,7 @@ class MangaService {
           if (source.id.isNotEmpty) source.id,
       ],
       pages: pages,
+      onPartial: onPartial,
       search: (sourceId, page) => search(
         query: query,
         sourceId: sourceId,

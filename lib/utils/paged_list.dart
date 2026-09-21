@@ -27,6 +27,20 @@ class PagedListState<T> {
 
   PagedListState<T> reset() => PagedListState<T>();
 
+  PagedListState<T> copyWith({
+    List<T>? items,
+    int? nextPage,
+    bool? hasMore,
+    String? nextToken,
+  }) {
+    return PagedListState<T>(
+      items: items ?? this.items,
+      nextPage: nextPage ?? this.nextPage,
+      hasMore: hasMore ?? this.hasMore,
+      nextToken: nextToken ?? this.nextToken,
+    );
+  }
+
   PagedListState<T> append(PagedResult<T> page) {
     return PagedListState<T>(
       items: [...items, ...page.items],
@@ -82,6 +96,17 @@ String remoteSummaryText({
     return '共0条';
   }
   return '本页$pageItemCount条  $page/$pageCount';
+}
+
+/// Full-screen catalog/search spinners destroy scroll position.
+/// Search and pagination must keep the existing scroll view instead.
+bool shouldReplaceCatalogWithLoader({
+  required bool loading,
+  required int itemCount,
+}) {
+  // itemCount cannot be negative; this stays false so a spinner never
+  // replaces an on-screen catalog/search list (including an empty in-flight one).
+  return loading && itemCount < 0;
 }
 
 bool shouldLoadMore({

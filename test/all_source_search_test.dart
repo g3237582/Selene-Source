@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:selene/search/all_source_search.dart';
 import 'package:selene/utils/paged_list.dart';
@@ -129,6 +131,37 @@ void main() {
       );
 
       expect(seen, ['a', 'b']);
+    });
+
+    test('emits each finished source before slower sources complete', () async {
+      final slow = Completer<PagedResult<String>>();
+      final partials = <List<String>>[];
+
+      final future = AllSourceSearch.fetch<String>(
+        sourceIds: const ['fast', 'slow'],
+        search: (id, page) async {
+          if (id == 'slow') {
+            return slow.future;
+          }
+          return const PagedResult(items: ['fast-1'], hasMore: false);
+        },
+        onPartial: (page) => partials.add(List<String>.from(page.items)),
+      );
+
+      await Future<void>.delayed(Duration.zero);
+      expect(partials, [
+        ['fast-1'],
+      ]);
+      expect(partials.first, isNot(contains('slow-1')));
+
+      slow.complete(const PagedResult(items: ['slow-1'], hasMore: true));
+      final page = await future;
+      expect(page.items, ['fast-1', 'slow-1']);
+      expect(page.nextPages, {'slow': 2});
+      expect(partials, [
+        ['fast-1'],
+        ['slow-1'],
+      ]);
     });
   });
 }

@@ -42,13 +42,18 @@ class _SearchScreenState extends State<SearchScreen>
   final ScrollController _scrollController = ScrollController();
   String _searchQuery = '';
   List<String> _searchHistory = [];
-  List<SearchResult> _searchResults = [];
+  final List<SearchResult> _searchResults = [];
   bool _hasSearched = false;
   bool _hasReceivedStart = false; // 是否已收到start消息
   String? _searchError;
-  SearchProgress? _searchProgress;
+  final ValueNotifier<SearchProgress?> _searchProgressListenable =
+      ValueNotifier(null);
+  final ValueNotifier<bool> _searchBusy = ValueNotifier(false);
+  bool _replaceOnNextResults = false;
   Timer? _updateTimer; // 用于防抖的定时器
   bool _useAggregatedView = true; // 是否使用聚合视图，默认开启
+
+  SearchProgress? get _searchProgress => _searchProgressListenable.value;
 
   // 筛选和排序状态
   String _selectedSource = 'all';
@@ -225,6 +230,8 @@ class _SearchScreenState extends State<SearchScreen>
     _updateTimer?.cancel();
     _posterHashTimer?.cancel();
     _searchService.dispose();
+    _searchProgressListenable.dispose();
+    _searchBusy.dispose();
     _deleteAnimationController?.dispose();
     super.dispose();
   }
@@ -240,8 +247,17 @@ class _SearchScreenState extends State<SearchScreen>
     _incrementalResultsSubscription =
         _searchService.incrementalResultsStream.listen((incrementalResults) {
       if (mounted && incrementalResults.isNotEmpty) {
-        // 将增量结果添加到现有结果列表中
-        _searchResults.addAll(incrementalResults);
+        if (_replaceOnNextResults) {
+          _searchResults
+            ..clear()
+            ..addAll(incrementalResults);
+          _replaceOnNextResults = false;
+          if (_scrollController.hasClients) {
+            _scrollController.jumpTo(0);
+          }
+        } else {
+          _searchResults.addAll(incrementalResults);
+        }
 
         // 使用防抖机制，避免过于频繁的UI更新，同时确保用户交互不受影响
         _updateTimer?.cancel();
@@ -263,11 +279,22 @@ class _SearchScreenState extends State<SearchScreen>
 
     // 监听搜索进度
     _progressSubscription = _searchService.progressStream.listen((progress) {
-      if (mounted) {
-        setState(() {
-          _searchProgress = progress;
-          _hasReceivedStart = true;
-        });
+      if (!mounted) {
+        return;
+      }
+      _searchProgressListenable.value = progress;
+      final finished = progress.completedSources >= progress.totalSources;
+      if (finished) {
+        _searchBusy.value = false;
+        if (_replaceOnNextResults) {
+          _searchResults.clear();
+          _replaceOnNextResults = false;
+          setState(() => _hasReceivedStart = true);
+          return;
+        }
+      }
+      if (!_hasReceivedStart) {
+        setState(() => _hasReceivedStart = true);
       }
     });
 
@@ -557,8 +584,12 @@ class _SearchScreenState extends State<SearchScreen>
       _hasSearched = true;
       _hasReceivedStart = false; // 重置start状态
       _searchError = null;
-      _searchResults.clear();
-      _searchProgress = null; // 清空进度信息
+      _replaceOnNextResults = _searchResults.isNotEmpty;
+      if (!_replaceOnNextResults) {
+        _searchResults.clear();
+      }
+      _searchProgressListenable.value = null;
+      _searchBusy.value = true;
       _useAggregatedView = true; // 默认开启聚合
       // 重置筛选和排序
       _selectedSource = 'all';
@@ -591,6 +622,7 @@ class _SearchScreenState extends State<SearchScreen>
           return;
         }
 
+        _searchBusy.value = false;
         setState(() {
           _searchError = e.toString();
         });
@@ -661,7 +693,9 @@ class _SearchScreenState extends State<SearchScreen>
               _hasReceivedStart = false;
               _searchResults.clear();
               _searchError = null;
-              _searchProgress = null;
+              _replaceOnNextResults = false;
+              _searchBusy.value = false;
+              _searchProgressListenable.value = null;
               _resetToFirstPage();
               _searchService.stopSearch();
             });
@@ -1084,15 +1118,36 @@ class _SearchScreenState extends State<SearchScreen>
                   ),
                   if (_hasSearched) ...[
                     const SizedBox(width: 8),
-                    Text(
-                      _getResultsSummaryText(),
-                      style: FontUtils.poppins(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w400,
-                        color: themeService.isDarkMode
-                            ? const Color(0xFFb0b0b0)
-                            : const Color(0xFF7f8c8d),
-                      ),
+                    ValueListenableBuilder<SearchProgress?>(
+                      valueListenable: _searchProgressListenable,
+                      builder: (context, _, __) {
+                        return Text(
+                          _getResultsSummaryText(),
+                          style: FontUtils.poppins(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w400,
+                            color: themeService.isDarkMode
+                                ? const Color(0xFFb0b0b0)
+                                : const Color(0xFF7f8c8d),
+                          ),
+                        );
+                      },
+                    ),
+                    ValueListenableBuilder<bool>(
+                      valueListenable: _searchBusy,
+                      builder: (context, busy, _) {
+                        if (!busy) {
+                          return const SizedBox.shrink();
+                        }
+                        return const Padding(
+                          padding: EdgeInsets.only(left: 8),
+                          child: SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ],
@@ -1171,6 +1226,7 @@ class _SearchScreenState extends State<SearchScreen>
                           results: _pagedSearchResults,
                           posterHashes: _posterHashes,
                           themeService: themeService,
+                          controller: _scrollController,
                           onVideoTap: _onVideoTap,
                           onGlobalMenuAction: _onGlobalMenuAction,
                           onSourceSelected: (SearchResult result) {
@@ -1194,6 +1250,7 @@ class _SearchScreenState extends State<SearchScreen>
                           key: ValueKey('list_grid_$_safePage'),
                           results: _pagedSearchResults,
                           themeService: themeService,
+                          controller: _scrollController,
                           onVideoTap: _onVideoTap,
                           onGlobalMenuAction: _onGlobalMenuAction,
                           hasReceivedStart: _hasReceivedStart,

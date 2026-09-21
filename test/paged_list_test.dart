@@ -157,4 +157,34 @@ void main() {
       );
     });
   });
+
+  group('shouldReplaceCatalogWithLoader', () {
+    test('never tears down an on-screen catalog for a spinner', () {
+      expect(
+        shouldReplaceCatalogWithLoader(loading: true, itemCount: 12),
+        isFalse,
+      );
+      expect(
+        shouldReplaceCatalogWithLoader(loading: true, itemCount: 0),
+        isFalse,
+      );
+      expect(
+        shouldReplaceCatalogWithLoader(loading: false, itemCount: 0),
+        isFalse,
+      );
+    });
+  });
+
+  group('PagedListState.copyWith', () {
+    test('updates hasMore without dropping already visible items', () {
+      final loaded = const PagedListState<String>().append(
+        const PagedResult(items: ['a', 'b'], hasMore: true),
+      );
+      final settled = loaded.copyWith(hasMore: false);
+
+      expect(settled.items, ['a', 'b']);
+      expect(settled.nextPage, loaded.nextPage);
+      expect(settled.hasMore, isFalse);
+    });
+  });
 }

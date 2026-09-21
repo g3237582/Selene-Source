@@ -129,4 +129,74 @@ void main() {
     expect(_position(tester).pixels, offset);
     expect(find.text('card-0'), findsNothing);
   });
+
+  testWidgets(
+      'keeps a scroll view and footer when the first search page is still loading',
+      (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PagedCatalogScroll(
+            itemCount: 0,
+            hasMore: true,
+            loadingMore: true,
+            onLoadMore: () {},
+            empty: const Text('暂无结果'),
+            itemBuilder: (context, index) => const SizedBox.shrink(),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(CustomScrollView), findsOneWidget);
+    expect(find.text('加载中…'), findsOneWidget);
+    expect(find.text('暂无结果'), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+  });
+
+  testWidgets(
+      'does not swap a visible catalog for a spinner when a new search starts',
+      (tester) async {
+    var itemCount = 18;
+    var loadingMore = false;
+    late void Function(void Function()) rebuild;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            rebuild = setState;
+            return Scaffold(
+              body: itemCount <= 0 && !loadingMore
+                  ? const Center(child: CircularProgressIndicator())
+                  : PagedCatalogScroll(
+                      itemCount: itemCount,
+                      hasMore: true,
+                      loadingMore: loadingMore,
+                      onLoadMore: () {},
+                      itemBuilder: (context, index) => SizedBox(
+                        height: 64,
+                        child: Text('keep-$index'),
+                      ),
+                    ),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+    await _jumpNearBottom(tester);
+    final offset = _position(tester).pixels;
+    expect(offset, greaterThan(0));
+    expect(find.text('keep-0'), findsNothing);
+
+    rebuild(() => loadingMore = true);
+    await tester.pump();
+
+    expect(find.byType(CustomScrollView), findsOneWidget);
+    expect(find.text('keep-0'), findsNothing);
+    expect(find.text('加载中…'), findsOneWidget);
+    expect(_position(tester).pixels, offset);
+  });
 }

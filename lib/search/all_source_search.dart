@@ -74,6 +74,7 @@ class AllSourceSearch {
     required List<String> sourceIds,
     required Future<PagedResult<T>> Function(String sourceId, int page) search,
     Map<String, int> pages = const {},
+    void Function(AllSourcePage<T> partial)? onPartial,
   }) async {
     final ids = _uniqueSourceIds(sourceIds);
     final targets = pages.isEmpty
@@ -87,28 +88,47 @@ class AllSourceSearch {
       return AllSourcePage<T>(items: const []);
     }
 
-    final outcomes = await Future.wait([
-      for (final id in orderedIds) _searchOne(search, id, targets[id]!),
-    ]);
-
-    final groups = <List<T>>[];
+    final groups = List<List<T>?>.filled(orderedIds.length, null);
     final nextPages = <String, int>{};
     final failedSourceIds = <String>[];
-    for (var index = 0; index < orderedIds.length; index++) {
-      final id = orderedIds[index];
-      final outcome = outcomes[index];
-      if (outcome.failed) {
-        failedSourceIds.add(id);
-        continue;
-      }
-      groups.add(outcome.items);
-      if (outcome.hasMore) {
-        nextPages[id] = targets[id]! + 1;
-      }
+    final pending = orderedIds.toSet();
+
+    AllSourcePage<T> snapshot({required List<T> items}) {
+      return AllSourcePage<T>(
+        items: items,
+        nextPages: {
+          ...nextPages,
+          for (final id in pending) id: targets[id]!,
+        },
+        failedSourceIds: List<String>.from(failedSourceIds),
+        queriedSourceIds: orderedIds,
+      );
     }
 
+    await Future.wait([
+      for (var index = 0; index < orderedIds.length; index++)
+        _searchOne(search, orderedIds[index], targets[orderedIds[index]]!).then((outcome) {
+          final id = orderedIds[index];
+          pending.remove(id);
+          if (outcome.failed) {
+            failedSourceIds.add(id);
+            return;
+          }
+          groups[index] = outcome.items;
+          if (outcome.hasMore) {
+            nextPages[id] = targets[id]! + 1;
+          }
+          if (onPartial != null && outcome.items.isNotEmpty) {
+            onPartial(snapshot(items: outcome.items));
+          }
+        }),
+    ]);
+
     return AllSourcePage<T>(
-      items: interleave(groups),
+      items: interleave([
+        for (final group in groups)
+          if (group != null) group,
+      ]),
       nextPages: nextPages,
       failedSourceIds: failedSourceIds,
       queriedSourceIds: orderedIds,

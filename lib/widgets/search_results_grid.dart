@@ -17,6 +17,7 @@ class SearchResultsGrid extends StatefulWidget {
   final Function(VideoInfo)? onVideoTap;
   final Function(VideoInfo, VideoMenuAction)? onGlobalMenuAction;
   final bool hasReceivedStart;
+  final ScrollController? controller;
 
   const SearchResultsGrid({
     super.key,
@@ -25,6 +26,7 @@ class SearchResultsGrid extends StatefulWidget {
     this.onVideoTap,
     this.onGlobalMenuAction,
     required this.hasReceivedStart,
+    this.controller,
   });
 
   @override
@@ -70,6 +72,7 @@ class _SearchResultsGridState extends State<SearchResultsGrid>
         final double itemHeight = itemWidth * 2.0; // 增加高度比例，确保有足够空间避免溢出
 
         return GridView.builder(
+          controller: widget.controller,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: crossAxisCount,
@@ -82,24 +85,20 @@ class _SearchResultsGridState extends State<SearchResultsGrid>
             final result = widget.results[index];
             final videoInfo = result.toVideoInfo();
 
-            return AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOut,
-              child: VideoCard(
-                key: ValueKey(
-                    '${result.id}_${result.source}'), // 为每个卡片添加唯一key
-                videoInfo: videoInfo,
-                onTap: widget.onVideoTap != null
-                    ? () => widget.onVideoTap!(videoInfo)
-                    : null,
-                from: 'search',
-                cardWidth: itemWidth, // 传递计算出的宽度
-                onGlobalMenuAction: widget.onGlobalMenuAction != null
-                    ? (action) => widget.onGlobalMenuAction!(videoInfo, action)
-                    : null,
-                isFavorited: _cacheService.isFavoritedSync(
-                    videoInfo.source, videoInfo.id), // 同步检查收藏状态
-              ),
+            return VideoCard(
+              key: ValueKey(
+                  '${result.id}_${result.source}'), // 为每个卡片添加唯一key
+              videoInfo: videoInfo,
+              onTap: widget.onVideoTap != null
+                  ? () => widget.onVideoTap!(videoInfo)
+                  : null,
+              from: 'search',
+              cardWidth: itemWidth, // 传递计算出的宽度
+              onGlobalMenuAction: widget.onGlobalMenuAction != null
+                  ? (action) => widget.onGlobalMenuAction!(videoInfo, action)
+                  : null,
+              isFavorited: _cacheService.isFavoritedSync(
+                  videoInfo.source, videoInfo.id), // 同步检查收藏状态
             );
           },
         );
