@@ -148,6 +148,20 @@ String bookFileBookMessage(BookItem book, {String format = ''}) {
 
 final _upstreamHttpStatus = RegExp(r'请求失败\s*[:：]\s*(\d{3})');
 
+bool isSourceSiteRefusal(Object error) {
+  final raw = error.toString();
+  if (raw.contains('源站拒绝') || raw.contains('拒绝获取章节')) {
+    return true;
+  }
+  return _upstreamHttpStatus.firstMatch(raw)?.group(1) == '403';
+}
+
+/// Source-site 403/拒绝 is not something Selene can scrape past.
+String bookSourceRefusalMessage(BookItem book, {required String what}) {
+  final source = book.sourceName.isEmpty ? '该书源' : '「${book.sourceName}」';
+  return '源站拒绝了$what。$source 屏蔽了抓取，客户端无法绕过。请换一个可用书源，或在后台更新该书源的登录/Cookie/请求头。';
+}
+
 String bookChaptersErrorMessage(Object error, BookItem book) {
   if (error is BookChaptersNotApplicableException) {
     return bookFileBookMessage(book, format: error.payload.format);
@@ -162,9 +176,8 @@ String bookChaptersErrorMessage(Object error, BookItem book) {
   if (status == '422') {
     return bookFileBookMessage(book);
   }
-  if (status == '403') {
-    final source = book.sourceName.isEmpty ? '该书源' : '「${book.sourceName}」';
-    return '源站拒绝了章节目录请求（403）。$source 可能需要登录、Cookie 或更新请求头，请换一个书源或检查后台书源规则。';
+  if (isSourceSiteRefusal(error)) {
+    return bookSourceRefusalMessage(book, what: '章节目录请求');
   }
   if (status == '404') {
     return '源站没有找到章节目录（404）。请换一个书源试试。';

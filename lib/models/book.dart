@@ -331,13 +331,22 @@ class BookChapter {
   });
 
   factory BookChapter.fromJson(Map<String, dynamic> json) {
+    final href = firstNonEmptyString([
+      json['href'],
+      json['url'],
+      json['chapterUrl'],
+      json['chapterHref'],
+    ]);
+    final title = firstNonEmptyString([
+      json['title'],
+      json['name'],
+      json['chapterName'],
+    ]);
     return BookChapter(
-      id: json['id']?.toString() ?? '',
-      title: json['title']?.toString() ?? '',
-      href: json['href']?.toString() ?? '',
-      order: json['order'] is int
-          ? json['order'] as int
-          : int.tryParse(json['order']?.toString() ?? '') ?? 0,
+      id: firstNonEmptyString([json['id'], href, title]),
+      title: title,
+      href: href,
+      order: jsonInt(json['order']) ?? jsonInt(json['index']) ?? 0,
     );
   }
 }
@@ -360,13 +369,85 @@ class BookChapterContent {
   });
 
   factory BookChapterContent.fromJson(Map<String, dynamic> json) {
+    final payloads = chapterPayloadMaps(json);
     return BookChapterContent(
-      id: json['id']?.toString() ?? '',
-      title: json['title']?.toString() ?? '',
-      href: json['href']?.toString() ?? '',
-      content: json['content']?.toString() ?? '',
-      nextHref: json['nextHref']?.toString() ?? '',
-      previousHref: json['previousHref']?.toString() ?? '',
+      id: firstNonEmptyString([
+        for (final item in payloads) item['id'],
+      ]),
+      title: firstNonEmptyString([
+        for (final item in payloads) ...[item['title'], item['name']],
+      ]),
+      href: firstNonEmptyString([
+        for (final item in payloads) ...[
+          item['href'],
+          item['url'],
+          item['chapterUrl'],
+        ],
+      ]),
+      content: chapterBodyFromJson(json),
+      nextHref: firstNonEmptyString([
+        for (final item in payloads) ...[item['nextHref'], item['next_href']],
+      ]),
+      previousHref: firstNonEmptyString([
+        for (final item in payloads) ...[
+          item['previousHref'],
+          item['previous_href'],
+        ],
+      ]),
     );
   }
+}
+
+int? jsonInt(Object? value) {
+  if (value is int) {
+    return value;
+  }
+  return int.tryParse(value?.toString() ?? '');
+}
+
+/// Walk LunaTV `{content}` plus aliases (`text`/`body`/`html`) and wrappers
+/// (`data`, `chapter`, or a map stored in `content`).
+String chapterBodyFromJson(Map<String, dynamic> json) {
+  const textKeys = ['content', 'text', 'body', 'html'];
+  const nestKeys = ['data', 'chapter', 'content'];
+  final queue = <Map<String, dynamic>>[json];
+  for (var i = 0; i < queue.length && i < 8; i++) {
+    final map = queue[i];
+    for (final key in textKeys) {
+      final value = map[key];
+      if (value == null || value is List) {
+        continue;
+      }
+      if (value is Map) {
+        queue.add(Map<String, dynamic>.from(value));
+        continue;
+      }
+      final text = value.toString();
+      if (text.trim().isNotEmpty && text.trim() != 'null') {
+        return text;
+      }
+    }
+    for (final key in nestKeys) {
+      final value = map[key];
+      if (value is Map) {
+        queue.add(Map<String, dynamic>.from(value));
+      }
+    }
+  }
+  return '';
+}
+
+List<Map<String, dynamic>> chapterPayloadMaps(Map<String, dynamic> json) {
+  final payloads = <Map<String, dynamic>>[json];
+  final data = json['data'];
+  if (data is Map) {
+    payloads.add(Map<String, dynamic>.from(data));
+  }
+  for (final current in List<Map<String, dynamic>>.from(payloads)) {
+    final chapter = current['chapter'];
+    if (chapter is Map) {
+      payloads.add(Map<String, dynamic>.from(chapter));
+    }
+  }
+  return payloads;
 }

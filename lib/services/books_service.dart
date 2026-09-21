@@ -2,6 +2,7 @@ import '../models/book.dart';
 import '../models/book_file.dart';
 import '../search/all_source_search.dart';
 import '../utils/book_catalog.dart';
+import '../utils/book_chapter.dart';
 import '../utils/json_records.dart';
 import '../utils/paged_list.dart';
 import 'api_service.dart';
@@ -293,19 +294,34 @@ class BooksService {
     required BookItem book,
     required BookChapter chapter,
   }) async {
+    final query = bookChapterQuery(book, chapter);
+    if ((query['href'] ?? '').isEmpty) {
+      throw Exception('章节地址缺失，无法请求正文。请返回目录重新打开。');
+    }
     final response = await ApiService.get<Map<String, dynamic>>(
       '/api/books/read/chapter',
-      queryParameters: {
-        'sourceId': book.sourceId,
-        'href': chapter.href,
-        if (book.detailHref.isNotEmpty) 'tocHref': book.detailHref,
-      },
+      queryParameters: query,
       fromJson: (data) => Map<String, dynamic>.from(data as Map),
     );
+    final notApplicable = BookChaptersNotApplicable.tryParse(
+      response.errorData ?? response.data,
+      statusCode: response.statusCode,
+    );
+    if (notApplicable != null) {
+      throw BookChaptersNotApplicableException(notApplicable);
+    }
     if (!response.success || response.data == null) {
       throw Exception(response.message ?? '获取章节内容失败');
     }
-    return BookChapterContent.fromJson(response.data!);
+    final parsed = BookChapterContent.fromJson(response.data!);
+    return BookChapterContent(
+      id: parsed.id.isEmpty ? chapter.id : parsed.id,
+      title: resolveChapterTitle(tocChapter: chapter, apiTitle: parsed.title),
+      href: parsed.href.isEmpty ? chapter.href : parsed.href,
+      content: parsed.content,
+      nextHref: parsed.nextHref,
+      previousHref: parsed.previousHref,
+    );
   }
 
   static Future<List<BookItem>> getShelf() async {
