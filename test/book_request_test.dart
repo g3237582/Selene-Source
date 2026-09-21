@@ -19,7 +19,10 @@ void main() {
       expect(bookDetailRequest(item)['bookId'], 'https://book.example/book/42');
       expect(bookDetailRequest(item)['href'], 'https://book.example/book/42');
       expect(bookChaptersQuery(item)['bookId'], 'https://book.example/book/42');
+      expect(bookChaptersQuery(item)['bookUrl'], 'https://book.example/book/42');
       expect(bookChaptersQuery(item)['href'], 'https://book.example/book/42');
+      expect(bookChaptersQuery(item)['detailHref'], 'https://book.example/book/42');
+      expect(bookChaptersQuery(item)['sourceId'], isEmpty);
     });
 
     test('empty id falls back to bookId then bookUrl', () {
@@ -62,6 +65,8 @@ void main() {
       expect(isBookDetailHref(item.detailHref), isFalse);
       expect(isReadableBookItem(item), isFalse);
       expect(bookChaptersQuery(item).containsKey('href'), isFalse);
+      expect(bookChaptersQuery(item).containsKey('detailHref'), isFalse);
+      expect(bookChaptersQuery(item).containsKey('bookUrl'), isFalse);
       expect(bookChaptersQuery(item)['bookId'], isNot('legado-explore:abc'));
     });
 
@@ -231,6 +236,9 @@ void main() {
 
       expect(shouldFetchBookChapters(item), isTrue);
       expect(bookChaptersQuery(item)['sourceId'], 'legado-a');
+      expect(bookChaptersQuery(item)['detailHref'], 'https://book.example/book/42');
+      expect(bookChaptersQuery(item)['bookId'], 'https://book.example/book/42');
+      expect(bookChaptersQuery(item)['bookUrl'], 'https://book.example/book/42');
       expect(
         bookChaptersErrorMessage(Exception('未找到对应的 Legado 书源'), item),
         isNot('未找到对应的 Legado 书源'),
@@ -308,6 +316,120 @@ void main() {
       expect(message, contains('客户端无法绕过'));
       expect(message, contains('换一个可用书源'));
       expect(message, isNot(contains('请求失败:403')));
+    });
+  });
+
+  group('search detailHref → chapters query', () {
+    test('detail_href is parsed and sent beside bookId, bookUrl, and sourceId', () {
+      final item = BookItem.fromJson(const {
+        'id': '117097',
+        'bookId': '117097',
+        'sourceId': 'legado_d43d71625efe0dab',
+        'sourceName': '爱下电子书',
+        'title': '活着',
+        'detail_href': 'https://ixdzs8.com/read/117097/',
+      });
+
+      expect(item.id, '117097');
+      expect(item.detailHref, 'https://ixdzs8.com/read/117097/');
+
+      final query = bookChaptersQuery(item);
+      expect(query['sourceId'], 'legado_d43d71625efe0dab');
+      expect(query['bookId'], 'https://ixdzs8.com/read/117097/');
+      expect(query['bookUrl'], 'https://ixdzs8.com/read/117097/');
+      expect(query['href'], 'https://ixdzs8.com/read/117097/');
+      expect(query['detailHref'], 'https://ixdzs8.com/read/117097/');
+    });
+
+    test('bookHref and book_href are detail locators when detailHref is absent', () {
+      final camel = BookItem.fromJson(const {
+        'bookId': '1',
+        'sourceId': 'legado-a',
+        'bookHref': 'https://book.example/b/1',
+      });
+      expect(camel.detailHref, 'https://book.example/b/1');
+      expect(bookChaptersQuery(camel)['detailHref'], 'https://book.example/b/1');
+      expect(bookChaptersQuery(camel)['bookId'], 'https://book.example/b/1');
+
+      final snake = BookItem.fromJson(const {
+        'bookId': '2',
+        'sourceId': 'legado-a',
+        'book_href': '/book/2',
+      });
+      expect(snake.detailHref, '/book/2');
+      expect(bookChaptersQuery(snake)['detailHref'], '/book/2');
+      expect(bookChaptersQuery(snake)['href'], '/book/2');
+    });
+
+    test('book_url is accepted and explicit detailHref still wins', () {
+      final fromSnakeUrl = BookItem.fromJson(const {
+        'bookId': '9',
+        'book_url': 'https://book.example/santi',
+      });
+      expect(fromSnakeUrl.detailHref, 'https://book.example/santi');
+      expect(
+        bookChaptersQuery(fromSnakeUrl)['detailHref'],
+        'https://book.example/santi',
+      );
+
+      final explicit = BookItem.fromJson(const {
+        'bookId': '1',
+        'detailHref': 'https://book.example/detail',
+        'detail_href': 'https://book.example/snake',
+        'bookHref': 'https://book.example/other',
+        'bookUrl': 'https://book.example/url',
+      });
+      expect(explicit.detailHref, 'https://book.example/detail');
+      expect(
+        bookChaptersQuery(explicit)['detailHref'],
+        'https://book.example/detail',
+      );
+    });
+
+    test('catalog cursors in detail_href are not sent to the chapters API', () {
+      final item = BookItem.fromJson(const {
+        'id': 'nav',
+        'sourceId': 'legado-a',
+        'title': '玄幻',
+        'detail_href': 'legado-explore:abc',
+      });
+
+      expect(item.detailHref, isEmpty);
+      expect(bookChaptersQuery(item).containsKey('detailHref'), isFalse);
+      expect(bookChaptersQuery(item).containsKey('href'), isFalse);
+      expect(bookChaptersQuery(item)['bookId'], 'nav');
+      expect(bookChaptersQuery(item)['sourceId'], 'legado-a');
+    });
+
+    test('OPDS acquisition books still probe chapters with their detailHref', () {
+      final item = BookItem.fromJson(const {
+        'id': 'urn:gutenberg:25329',
+        'bookId': '25329',
+        'title': '朝花夕拾',
+        'sourceId': 'gutenberg-zh',
+        'sourceType': 'opds',
+        'detail_href': 'https://www.gutenberg.org/ebooks/25329.opds',
+        'acquisitionLinks': [
+          {
+            'rel': 'http://opds-spec.org/acquisition',
+            'type': 'application/epub+zip',
+            'href': 'https://www.gutenberg.org/ebooks/25329.epub.images',
+          },
+        ],
+      });
+
+      expect(item.format, 'epub');
+      expect(item.acquisitionHref, contains('.epub.images'));
+      expect(isFileStyleBook(item), isTrue);
+      expect(shouldFetchBookChapters(item), isTrue);
+
+      final query = bookChaptersQuery(item);
+      expect(query['sourceId'], 'gutenberg-zh');
+      expect(query['bookId'], 'https://www.gutenberg.org/ebooks/25329.opds');
+      expect(query['bookUrl'], 'https://www.gutenberg.org/ebooks/25329.opds');
+      expect(query['href'], 'https://www.gutenberg.org/ebooks/25329.opds');
+      expect(query['detailHref'], 'https://www.gutenberg.org/ebooks/25329.opds');
+      expect(query['detailHref'], isNot(contains('.epub')));
     });
   });
 }

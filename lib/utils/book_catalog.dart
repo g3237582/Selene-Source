@@ -62,12 +62,17 @@ Map<String, String> bookDetailRequest(BookItem book) {
 
 Map<String, String> bookChaptersQuery(BookItem book) {
   final locator = resolveBookDetailLocator(book);
-  final href =
+  // LunaTV prefers this search-result URL over rebuilding a page from bookId.
+  // Sources whose bookUrl rule has no {id} template otherwise 500 with
+  // 「无法通过 bookId 定位」.
+  final detailHref =
       isBookDetailHref(book.detailHref) ? book.detailHref.trim() : '';
   return {
     'sourceId': book.sourceId,
     if (locator.isNotEmpty) 'bookId': locator,
-    if (href.isNotEmpty) 'href': href,
+    if (isBookDetailHref(locator)) 'bookUrl': locator,
+    if (detailHref.isNotEmpty) 'href': detailHref,
+    if (detailHref.isNotEmpty) 'detailHref': detailHref,
   };
 }
 
