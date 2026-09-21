@@ -9,6 +9,7 @@ import '../utils/font_utils.dart';
 import '../utils/paged_list.dart';
 import '../widgets/authenticated_image.dart';
 import '../widgets/paged_catalog_scroll.dart';
+import '../widgets/source_filter_bar.dart';
 import 'book_detail_screen.dart';
 
 class BooksScreen extends StatefulWidget {
@@ -31,6 +32,18 @@ class _BooksScreenState extends State<BooksScreen> {
   String? _error;
   int _tab = 0;
   int _discoverGeneration = 0;
+
+  String? get _browseSourceId {
+    if (_sourceId != null && _sourceId!.isNotEmpty) {
+      return _sourceId;
+    }
+    for (final source in _sources) {
+      if (source.catalogSupported && source.id.isNotEmpty) {
+        return source.id;
+      }
+    }
+    return _sources.isNotEmpty ? _sources.first.id : null;
+  }
 
   @override
   void initState() {
@@ -64,10 +77,7 @@ class _BooksScreenState extends State<BooksScreen> {
     try {
       final sources = await BooksService.getSources();
       if (!mounted) return;
-      setState(() {
-        _sources = sources;
-        _sourceId ??= sources.isNotEmpty ? sources.first.id : null;
-      });
+      setState(() => _sources = sources);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -84,7 +94,9 @@ class _BooksScreenState extends State<BooksScreen> {
     if (query.isEmpty && _sourceId == null) {
       setState(() {
         _loading = false;
+        _error = null;
         _page = const PagedListState();
+        _navigation = [];
       });
       _loadingMore.value = false;
       return;
@@ -104,12 +116,24 @@ class _BooksScreenState extends State<BooksScreen> {
 
     try {
       late final PagedResult<BookItem> result;
-      if (query.isNotEmpty && (reset || _page.items.isEmpty)) {
-        final items = await BooksService.search(
-          query: query,
-          sourceId: _sourceId,
-        );
-        result = PagedResult(items: items, hasMore: false);
+      if (query.isNotEmpty) {
+        if (_sourceId == null) {
+          final aggregated = await BooksService.searchAll(
+            query: query,
+            sources: _sources,
+          );
+          if (!mounted || generation != _discoverGeneration) return;
+          if (aggregated.errorMessage != null && aggregated.items.isEmpty) {
+            throw Exception(aggregated.errorMessage);
+          }
+          result = aggregated.toPagedResult();
+        } else {
+          final items = await BooksService.search(
+            query: query,
+            sourceId: _sourceId,
+          );
+          result = PagedResult(items: items, hasMore: false);
+        }
       } else {
         final fetched = await _fetchCatalog(firstBatch: reset || _page.items.isEmpty);
         if (!mounted || generation != _discoverGeneration) return;
@@ -151,20 +175,20 @@ class _BooksScreenState extends State<BooksScreen> {
     if (!firstBatch) {
       return (
         catalog: await BooksService.catalog(
-          sourceId: _sourceId!,
+          sourceId: _browseSourceId!,
           href: _page.nextToken,
         ),
         selectedHref: null,
       );
     }
     if (_catalogHref.isEmpty) {
-      final root = await BooksService.catalog(sourceId: _sourceId!, href: '');
+      final root = await BooksService.catalog(sourceId: _browseSourceId!, href: '');
       final autoHref = resolveDefaultBookCatalogHref(
         entries: root.entries,
         navigation: root.navigation,
       );
       if (autoHref != null) {
-        final page = await BooksService.catalog(sourceId: _sourceId!, href: autoHref);
+        final page = await BooksService.catalog(sourceId: _browseSourceId!, href: autoHref);
         return (
           catalog: BookCatalog(
             entries: page.entries,
@@ -177,7 +201,7 @@ class _BooksScreenState extends State<BooksScreen> {
       return (catalog: root, selectedHref: null);
     }
     return (
-      catalog: await BooksService.catalog(sourceId: _sourceId!, href: _catalogHref),
+      catalog: await BooksService.catalog(sourceId: _browseSourceId!, href: _catalogHref),
       selectedHref: null,
     );
   }
@@ -259,37 +283,24 @@ class _BooksScreenState extends State<BooksScreen> {
               style: FontUtils.poppins(color: textColor, fontSize: 14),
             ),
           ),
-          if (_sources.isNotEmpty)
-            SizedBox(
-              height: 40,
-              child: ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                scrollDirection: Axis.horizontal,
-                itemBuilder: (context, index) {
-                  final source = _sources[index];
-                  final selected = source.id == _sourceId;
-                  return ChoiceChip(
-                    label: Text(source.name),
-                    selected: selected,
-                    onSelected: (_) {
-                      setState(() {
-                        _sourceId = source.id;
-                        _catalogHref = '';
-                      });
-                      _reloadDiscover();
-                    },
-                    selectedColor: const Color(0xFF27ae60),
-                    labelStyle: FontUtils.poppins(
-                      fontSize: 12,
-                      color: selected ? Colors.white : textColor,
-                    ),
-                  );
-                },
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemCount: _sources.length,
-              ),
-            ),
-          if (_navigation.isNotEmpty)
+          SourceFilterBar(
+            sources: [
+              for (final source in _sources)
+                SourceFilterOption(id: source.id, name: source.name),
+            ],
+            selectedId: _sourceId,
+            textColor: textColor,
+            onSelected: (sourceId) {
+              setState(() {
+                _sourceId = sourceId;
+                _catalogHref = '';
+              });
+              _reloadDiscover();
+            },
+          ),
+          if (_sourceId != null &&
+              _navigation.isNotEmpty &&
+              _searchController.text.trim().isEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: SizedBox(
@@ -341,13 +352,15 @@ class _BooksScreenState extends State<BooksScreen> {
         ),
       );
     }
+    final query = _searchController.text.trim();
     return _BookGrid(
-      key: ValueKey(
-        'books-$_sourceId-$_catalogHref-${_searchController.text.trim()}',
-      ),
+      key: ValueKey('books-$_sourceId-$_catalogHref-$query'),
       items: _page.items,
       hasMore: _page.hasMore,
       loadingMore: _loadingMore,
+      emptyLabel: query.isEmpty
+          ? (_sourceId == null ? '输入关键词进行全源搜索' : '暂无书籍')
+          : '未找到相关电子书',
       onLoadMore: () => _loadDiscover(reset: false),
       onTap: _openBook,
     );
@@ -359,6 +372,7 @@ class _BookGrid extends StatelessWidget {
   final bool hasMore;
   final ValueNotifier<bool>? loadingMore;
   final VoidCallback? onLoadMore;
+  final String emptyLabel;
   final ValueChanged<BookItem> onTap;
 
   const _BookGrid({
@@ -367,6 +381,7 @@ class _BookGrid extends StatelessWidget {
     this.hasMore = false,
     this.loadingMore,
     this.onLoadMore,
+    this.emptyLabel = '暂无书籍',
     required this.onTap,
   });
 
@@ -384,7 +399,7 @@ class _BookGrid extends StatelessWidget {
         mainAxisSpacing: 12,
       ),
       empty: Center(
-        child: Text('暂无书籍', style: FontUtils.poppins(color: const Color(0xFF7f8c8d))),
+        child: Text(emptyLabel, style: FontUtils.poppins(color: const Color(0xFF7f8c8d))),
       ),
       itemBuilder: (context, index) {
         final item = items[index];
@@ -410,10 +425,20 @@ class _BookGrid extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 item.title,
-                maxLines: 2,
+                maxLines: item.sourceName.isEmpty ? 2 : 1,
                 overflow: TextOverflow.ellipsis,
                 style: FontUtils.poppins(fontSize: 12, fontWeight: FontWeight.w600),
               ),
+              if (item.sourceName.isNotEmpty)
+                Text(
+                  item.sourceName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: FontUtils.poppins(
+                    fontSize: 10,
+                    color: const Color(0xFF7f8c8d),
+                  ),
+                ),
             ],
           ),
         );

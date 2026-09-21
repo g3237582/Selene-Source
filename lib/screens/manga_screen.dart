@@ -9,10 +9,10 @@ import '../utils/font_utils.dart';
 import '../utils/paged_list.dart';
 import '../widgets/authenticated_image.dart';
 import '../widgets/paged_catalog_scroll.dart';
+import '../widgets/source_filter_bar.dart';
 import 'manga_detail_screen.dart';
 
 typedef _OpenManga = void Function(MangaItem item, {bool resumeIfPossible});
-
 String _shelfProgressLabel(
   MangaShelfItem item,
   List<MangaReadRecord> history,
@@ -39,6 +39,7 @@ class _MangaScreenState extends State<MangaScreen> {
   final ValueNotifier<bool> _loadingMore = ValueNotifier(false);
   List<MangaSource> _sources = [];
   String? _sourceId;
+  Map<String, int> _allSourcePages = const {};
   PagedListState<MangaItem> _page = const PagedListState();
   List<MangaShelfItem> _shelf = [];
   List<MangaReadRecord> _history = [];
@@ -79,10 +80,7 @@ class _MangaScreenState extends State<MangaScreen> {
     try {
       final sources = await MangaService.getSources();
       if (!mounted) return;
-      setState(() {
-        _sources = sources;
-        _sourceId ??= sources.isNotEmpty ? sources.first.id : null;
-      });
+      setState(() => _sources = sources);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -99,6 +97,7 @@ class _MangaScreenState extends State<MangaScreen> {
     if (query.isEmpty && _sourceId == null) {
       setState(() {
         _loading = false;
+        _error = null;
         _page = const PagedListState();
       });
       _loadingMore.value = false;
@@ -118,16 +117,31 @@ class _MangaScreenState extends State<MangaScreen> {
     }
 
     try {
-      final result = query.isEmpty
-          ? await MangaService.recommend(
-              sourceId: _sourceId!,
-              page: reset ? 1 : _page.nextPage,
-            )
-          : await MangaService.search(
-              query: query,
-              sourceId: _sourceId,
-              page: reset ? 1 : _page.nextPage,
-            );
+      late final PagedResult<MangaItem> result;
+      if (query.isEmpty) {
+        result = await MangaService.recommend(
+          sourceId: _sourceId!,
+          page: reset ? 1 : _page.nextPage,
+        );
+      } else if (_sourceId == null) {
+        final aggregated = await MangaService.searchAll(
+          query: query,
+          sources: _sources,
+          pages: reset ? const {} : _allSourcePages,
+        );
+        if (!mounted || generation != _discoverGeneration) return;
+        _allSourcePages = aggregated.nextPages;
+        if (aggregated.errorMessage != null && aggregated.items.isEmpty) {
+          throw Exception(aggregated.errorMessage);
+        }
+        result = aggregated.toPagedResult();
+      } else {
+        result = await MangaService.search(
+          query: query,
+          sourceId: _sourceId,
+          page: reset ? 1 : _page.nextPage,
+        );
+      }
       if (!mounted || generation != _discoverGeneration) return;
       final page = result.items.isEmpty
           ? const PagedResult<MangaItem>(items: [], hasMore: false)
@@ -231,33 +245,21 @@ class _MangaScreenState extends State<MangaScreen> {
               style: FontUtils.poppins(color: textColor, fontSize: 14),
             ),
           ),
-          if (_sources.isNotEmpty)
-            SizedBox(
-              height: 40,
-              child: ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                scrollDirection: Axis.horizontal,
-                itemCount: _sources.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (context, index) {
-                  final source = _sources[index];
-                  final selected = source.id == _sourceId;
-                  return ChoiceChip(
-                    label: Text(source.name),
-                    selected: selected,
-                    onSelected: (_) {
-                      setState(() => _sourceId = source.id);
-                      _reloadDiscover();
-                    },
-                    selectedColor: const Color(0xFF27ae60),
-                    labelStyle: FontUtils.poppins(
-                      fontSize: 12,
-                      color: selected ? Colors.white : textColor,
-                    ),
-                  );
-                },
-              ),
-            ),
+          SourceFilterBar(
+            sources: [
+              for (final source in _sources)
+                SourceFilterOption(id: source.id, name: source.name),
+            ],
+            selectedId: _sourceId,
+            textColor: textColor,
+            onSelected: (sourceId) {
+              setState(() {
+                _sourceId = sourceId;
+                _allSourcePages = const {};
+              });
+              _reloadDiscover();
+            },
+          ),
         ],
         Expanded(
           child: _tab == 0
@@ -280,11 +282,15 @@ class _MangaScreenState extends State<MangaScreen> {
         ),
       );
     }
+    final query = _searchController.text.trim();
     return _MangaGrid(
-      key: ValueKey('manga-$_sourceId-${_searchController.text.trim()}'),
+      key: ValueKey('manga-$_sourceId-$query'),
       items: _page.items,
       hasMore: _page.hasMore,
       loadingMore: _loadingMore,
+      emptyLabel: query.isEmpty
+          ? (_sourceId == null ? '输入关键词进行全源搜索' : '暂无漫画')
+          : '未找到相关漫画',
       onLoadMore: () => _loadDiscover(reset: false),
       onTap: _openManga,
     );
@@ -320,6 +326,7 @@ class _MangaGrid extends StatelessWidget {
   final List<MangaItem> items;
   final bool hasMore;
   final ValueNotifier<bool> loadingMore;
+  final String emptyLabel;
   final VoidCallback onLoadMore;
   final _OpenManga onTap;
 
@@ -328,6 +335,7 @@ class _MangaGrid extends StatelessWidget {
     required this.items,
     required this.hasMore,
     required this.loadingMore,
+    this.emptyLabel = '暂无漫画',
     required this.onLoadMore,
     required this.onTap,
   });
@@ -346,7 +354,10 @@ class _MangaGrid extends StatelessWidget {
         mainAxisSpacing: 12,
       ),
       empty: Center(
-        child: Text('暂无漫画', style: FontUtils.poppins(color: const Color(0xFF7f8c8d))),
+        child: Text(
+          emptyLabel,
+          style: FontUtils.poppins(color: const Color(0xFF7f8c8d)),
+        ),
       ),
       itemBuilder: (context, index) {
         final item = items[index];
@@ -365,10 +376,20 @@ class _MangaGrid extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 item.title,
-                maxLines: 2,
+                maxLines: item.sourceName.isEmpty ? 2 : 1,
                 overflow: TextOverflow.ellipsis,
                 style: FontUtils.poppins(fontSize: 12, fontWeight: FontWeight.w600),
               ),
+              if (item.sourceName.isNotEmpty)
+                Text(
+                  item.sourceName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: FontUtils.poppins(
+                    fontSize: 10,
+                    color: const Color(0xFF7f8c8d),
+                  ),
+                ),
             ],
           ),
         );

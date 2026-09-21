@@ -1,5 +1,6 @@
 import '../manga/manga_progress.dart';
 import '../models/manga.dart';
+import '../search/all_source_search.dart';
 import '../utils/json_records.dart';
 import '../utils/paged_list.dart';
 import '../utils/remote_error.dart';
@@ -48,6 +49,25 @@ class MangaService {
       hasMore: resolveHasMore(
         data: response.data!,
         itemCount: results.length,
+      ),
+    );
+  }
+
+  static Future<AllSourcePage<MangaItem>> searchAll({
+    required String query,
+    required List<MangaSource> sources,
+    Map<String, int> pages = const {},
+  }) {
+    return AllSourceSearch.fetch(
+      sourceIds: [
+        for (final source in sources)
+          if (source.id.isNotEmpty) source.id,
+      ],
+      pages: pages,
+      search: (sourceId, page) => search(
+        query: query,
+        sourceId: sourceId,
+        page: page,
       ),
     );
   }

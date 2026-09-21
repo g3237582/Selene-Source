@@ -11,6 +11,7 @@ import '../utils/paged_list.dart';
 import '../widgets/music_home_widgets.dart';
 import '../widgets/music_track_tile.dart';
 import '../widgets/paged_catalog_scroll.dart';
+import '../widgets/source_filter_bar.dart';
 import 'music_player_screen.dart';
 import 'music_playlist_screen.dart';
 
@@ -24,7 +25,9 @@ class MusicScreen extends StatefulWidget {
 class _MusicScreenState extends State<MusicScreen> {
   final TextEditingController _searchController = TextEditingController();
   final ValueNotifier<bool> _loadingMore = ValueNotifier(false);
-  String _source = 'wy';
+  String? _source;
+  String _browseSource = 'wy';
+  Map<String, int> _allSourcePages = const {};
   int _homeTab = 0;
   PagedListState<MusicTrack> _searchPage = const PagedListState();
   PagedListState<MusicPlaylist> _playlistPage = const PagedListState();
@@ -64,7 +67,7 @@ class _MusicScreenState extends State<MusicScreen> {
     _loadingMore.value = false;
     try {
       if (_homeTab == 0) {
-        final boards = await MusicService.getBoards(source: _source);
+        final boards = await MusicService.getBoards(source: _browseSource);
         if (!mounted) return;
         setState(() {
           _boards = boards;
@@ -74,7 +77,7 @@ class _MusicScreenState extends State<MusicScreen> {
       }
       List<MusicTag> tags = _hotTags;
       try {
-        tags = await MusicService.getSongListTags(source: _source);
+        tags = await MusicService.getSongListTags(source: _browseSource);
       } catch (_) {}
       await _loadPlaylists(reset: true);
       if (!mounted) return;
@@ -85,7 +88,7 @@ class _MusicScreenState extends State<MusicScreen> {
     } catch (error) {
       if (_homeTab == 1) {
         try {
-          final boards = await MusicService.getBoards(source: _source);
+          final boards = await MusicService.getBoards(source: _browseSource);
           if (!mounted) return;
           if (boards.isNotEmpty) {
             setState(() {
@@ -118,7 +121,7 @@ class _MusicScreenState extends State<MusicScreen> {
     }
     try {
       final page = await MusicService.getSongLists(
-        source: _source,
+        source: _browseSource,
         tagId: _tagId,
         sortId: _sortId,
         page: reset ? 1 : _playlistPage.nextPage,
@@ -178,11 +181,25 @@ class _MusicScreenState extends State<MusicScreen> {
     }
 
     try {
-      final result = await MusicService.search(
-        query: query,
-        source: _source,
-        page: reset ? 1 : _searchPage.nextPage,
-      );
+      late final PagedResult<MusicTrack> result;
+      if (_source == null) {
+        final aggregated = await MusicService.searchAll(
+          query: query,
+          pages: reset ? const {} : _allSourcePages,
+        );
+        if (!mounted || generation != _searchGeneration) return;
+        _allSourcePages = aggregated.nextPages;
+        if (aggregated.errorMessage != null && aggregated.items.isEmpty) {
+          throw Exception(aggregated.errorMessage);
+        }
+        result = aggregated.toPagedResult();
+      } else {
+        result = await MusicService.search(
+          query: query,
+          source: _source!,
+          page: reset ? 1 : _searchPage.nextPage,
+        );
+      }
       if (!mounted || generation != _searchGeneration) return;
       setState(() {
         _searchPage =
@@ -202,8 +219,14 @@ class _MusicScreenState extends State<MusicScreen> {
     }
   }
 
-  void _changeSource(String source) {
-    setState(() => _source = source);
+  void _changeSource(String? source) {
+    setState(() {
+      _source = source;
+      if (source != null) {
+        _browseSource = source;
+      }
+      _allSourcePages = const {};
+    });
     if (_inSearch) {
       _search(reset: true);
     } else {
@@ -216,7 +239,7 @@ class _MusicScreenState extends State<MusicScreen> {
       MaterialPageRoute(
         builder: (_) => MusicPlaylistScreen(
           title: board.name,
-          source: board.source.isNotEmpty ? board.source : _source,
+          source: board.source.isNotEmpty ? board.source : _browseSource,
           id: board.id,
           kind: MusicPlaylistKind.board,
         ),
@@ -229,7 +252,7 @@ class _MusicScreenState extends State<MusicScreen> {
       MaterialPageRoute(
         builder: (_) => MusicPlaylistScreen(
           title: playlist.name,
-          source: playlist.source.isNotEmpty ? playlist.source : _source,
+          source: playlist.source.isNotEmpty ? playlist.source : _browseSource,
           id: playlist.id,
           kind: MusicPlaylistKind.songlist,
         ),
@@ -284,28 +307,14 @@ class _MusicScreenState extends State<MusicScreen> {
             style: FontUtils.poppins(color: textColor, fontSize: 14),
           ),
         ),
-        SizedBox(
-          height: 40,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            children: [
-              for (final entry in musicSourceLabels.entries)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(entry.value),
-                    selected: _source == entry.key,
-                    onSelected: (_) => _changeSource(entry.key),
-                    selectedColor: const Color(0xFF27ae60),
-                    labelStyle: FontUtils.poppins(
-                      fontSize: 12,
-                      color: _source == entry.key ? Colors.white : textColor,
-                    ),
-                  ),
-                ),
-            ],
-          ),
+        SourceFilterBar(
+          sources: [
+            for (final entry in musicSourceLabels.entries)
+              SourceFilterOption(id: entry.key, name: entry.value),
+          ],
+          selectedId: _source,
+          textColor: textColor,
+          onSelected: _changeSource,
         ),
         if (!_inSearch)
           MusicHomeTabBar(
@@ -426,7 +435,7 @@ class _MusicScreenState extends State<MusicScreen> {
       return MusicBoardList(boards: _boards, onTap: _openBoard);
     }
     return MusicPlaylistGrid(
-      key: ValueKey('playlists-$_source-$_sortId-$_tagId'),
+      key: ValueKey('playlists-$_browseSource-$_sortId-$_tagId'),
       items: _playlistPage.items,
       hasMore: _playlistPage.hasMore,
       loadingMore: _loadingMore,
@@ -455,7 +464,7 @@ class _MusicScreenState extends State<MusicScreen> {
       itemBuilder: (context, index) {
         final track = _searchPage.items[index];
         return ListenableBuilder(
-          key: ValueKey(track.songId),
+          key: ValueKey('${track.source}-${track.songId}'),
           listenable: player,
           builder: (context, _) {
             final playing = player.current?.songId == track.songId;

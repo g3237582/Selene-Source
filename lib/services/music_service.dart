@@ -1,5 +1,6 @@
 import '../models/music_discovery.dart';
 import '../models/music_track.dart';
+import '../search/all_source_search.dart';
 import '../utils/paged_list.dart';
 import 'api_service.dart';
 import 'user_data_service.dart';
@@ -36,6 +37,22 @@ class MusicService {
       items: list,
       hasMore: data['hasMore'] == true ||
           inferHasMore(itemCount: list.length, pageSize: 20),
+    );
+  }
+
+  static Future<AllSourcePage<MusicTrack>> searchAll({
+    required String query,
+    List<String> sources = const [],
+    Map<String, int> pages = const {},
+  }) {
+    return AllSourceSearch.fetch(
+      sourceIds: sources.isEmpty ? musicSourceLabels.keys.toList() : sources,
+      pages: pages,
+      search: (source, page) => search(
+        query: query,
+        source: source,
+        page: page,
+      ),
     );
   }
 
