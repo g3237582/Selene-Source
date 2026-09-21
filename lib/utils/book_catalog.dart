@@ -5,6 +5,45 @@ bool isReadableBookItem(BookItem item) {
   return isBookDetailHref(item.detailHref) || isBookDetailHref(item.id);
 }
 
+/// The client can open EPUB/PDF via /api/books/file and /api/books/read/manifest.
+const bool kBookFileStreamReaderEnabled = true;
+
+/// Books that belong in catalog / recommend / search / home lists.
+/// File-style OPDS items stay visible when a file hint exists; chapter-less
+/// books without a usable file path stay hidden.
+bool isListableBookItem(
+  BookItem item, {
+  bool fileStreamReaderEnabled = kBookFileStreamReaderEnabled,
+}) {
+  if (!isReadableBookItem(item)) {
+    return false;
+  }
+  if (isFileStyleBook(item) || item.chaptersSupported == false) {
+    return canOpenFileStyleBook(
+      item,
+      fileStreamReaderEnabled: fileStreamReaderEnabled,
+    );
+  }
+  return true;
+}
+
+bool hasUsableBookFileHint(BookItem item) {
+  return item.acquisitionHref.trim().isNotEmpty ||
+      item.acquisitionHint.trim().isNotEmpty ||
+      item.manifestHint.trim().isNotEmpty;
+}
+
+bool canOpenFileStyleBook(
+  BookItem item, {
+  bool fileStreamReaderEnabled = kBookFileStreamReaderEnabled,
+}) {
+  return fileStreamReaderEnabled && hasUsableBookFileHint(item);
+}
+
+List<BookItem> listableBookItems(Iterable<BookItem> items) {
+  return [for (final item in items) if (isListableBookItem(item)) item];
+}
+
 Map<String, String> bookDetailRequest(BookItem book) {
   final locator = resolveBookDetailLocator(book);
   final href = isBookDetailHref(book.detailHref)
@@ -63,6 +102,15 @@ BookItem mergeBookDetail(BookItem remote, BookItem local) {
       remote.acquisitionHref,
       local.acquisitionHref,
     ]),
+    chaptersSupported: remote.chaptersSupported ?? local.chaptersSupported,
+    acquisitionHint: firstNonEmptyString([
+      remote.acquisitionHint,
+      local.acquisitionHint,
+    ]),
+    manifestHint: firstNonEmptyString([
+      remote.manifestHint,
+      local.manifestHint,
+    ]),
   );
 }
 
@@ -71,7 +119,8 @@ bool isFileStyleBook(BookItem book) {
   if (format == 'epub' || format == 'pdf') {
     return true;
   }
-  return book.sourceType.toLowerCase() == 'opds';
+  final type = book.sourceType.toLowerCase();
+  return type == 'opds' || type == 'epub';
 }
 
 bool shouldFetchBookChapters(BookItem book) {

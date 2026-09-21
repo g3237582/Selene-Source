@@ -182,6 +182,7 @@ void main() {
             sourceName: 'Wol',
             title: '三体',
             author: '刘慈欣',
+            detailHref: 'https://book.example/book/1',
           ),
         ],
         nextHref: 'page-2.xml',
@@ -195,6 +196,46 @@ void main() {
       expect(page.items.single.title, '三体');
       expect(page.hasMore, isTrue);
       expect(page.nextToken, 'page-2.xml');
+    });
+
+    test('homeCatalogResult keeps hinted file books and hides unsupported ones', () {
+      const page = BookCatalog(
+        entries: [
+          BookItem(
+            id: '1',
+            sourceId: 'legado-a',
+            sourceName: '书源A',
+            sourceType: 'legado',
+            title: '三体',
+            detailHref: 'https://book.example/book/1',
+          ),
+          BookItem(
+            id: '25329',
+            sourceId: 'gutenberg-zh',
+            sourceName: '古腾堡中文',
+            sourceType: 'opds',
+            title: '朝花夕拾',
+            detailHref: 'https://www.gutenberg.org/ebooks/25329.opds',
+            format: 'epub',
+            acquisitionHref:
+                'https://www.gutenberg.org/ebooks/25329.epub.images',
+          ),
+          BookItem(
+            id: 'no-hint',
+            sourceId: 'gutenberg-zh',
+            sourceName: '古腾堡中文',
+            sourceType: 'opds',
+            title: '无文件提示',
+            detailHref: 'https://www.gutenberg.org/ebooks/1.opds',
+            format: 'epub',
+          ),
+        ],
+        nextHref: 'page-2.xml',
+      );
+
+      final result = BooksService.homeCatalogResult(root: page);
+      expect(result.items.map((item) => item.title), ['三体', '朝花夕拾']);
+      expect(result.hasMore, isTrue);
     });
   });
 }

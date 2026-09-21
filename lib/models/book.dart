@@ -39,6 +39,9 @@ class BookItem {
   final String detailHref;
   final String format;
   final String acquisitionHref;
+  final bool? chaptersSupported;
+  final String acquisitionHint;
+  final String manifestHint;
 
   const BookItem({
     required this.id,
@@ -52,6 +55,9 @@ class BookItem {
     this.detailHref = '',
     this.format = 'chapters',
     this.acquisitionHref = '',
+    this.chaptersSupported,
+    this.acquisitionHint = '',
+    this.manifestHint = '',
   });
 
   factory BookItem.fromJson(Map<String, dynamic> json) {
@@ -83,7 +89,17 @@ class BookItem {
       ),
       acquisitionHref: firstNonEmptyString([
         json['acquisitionHref'],
+        json['acquisition_href'],
         acquisition.href,
+      ]),
+      chaptersSupported: optionalBool(json['chaptersSupported']),
+      acquisitionHint: firstNonEmptyString([
+        json['acquisitionHint'],
+        json['acquisition_hint'],
+      ]),
+      manifestHint: firstNonEmptyString([
+        json['manifestHint'],
+        json['manifest_hint'],
       ]),
     );
   }
@@ -139,6 +155,9 @@ class BookItem {
     String? detailHref,
     String? format,
     String? acquisitionHref,
+    bool? chaptersSupported,
+    String? acquisitionHint,
+    String? manifestHint,
   }) {
     return BookItem(
       id: id ?? this.id,
@@ -152,6 +171,9 @@ class BookItem {
       detailHref: detailHref ?? this.detailHref,
       format: format ?? this.format,
       acquisitionHref: acquisitionHref ?? this.acquisitionHref,
+      chaptersSupported: chaptersSupported ?? this.chaptersSupported,
+      acquisitionHint: acquisitionHint ?? this.acquisitionHint,
+      manifestHint: manifestHint ?? this.manifestHint,
     );
   }
 }
@@ -188,8 +210,28 @@ String _sourceTypeFromJson(Map<String, dynamic> json) {
   if (explicit.isNotEmpty) {
     return explicit;
   }
-  final type = firstNonEmptyString([json['type']]).toLowerCase();
-  return type == 'opds' || type == 'legado' ? type : '';
+  final type = firstNonEmptyString([
+    json['type'],
+    json['bookProvider'],
+  ]).toLowerCase();
+  return type == 'opds' || type == 'legado' || type == 'epub' ? type : '';
+}
+
+bool? optionalBool(Object? value) {
+  if (value == null) {
+    return null;
+  }
+  if (value is bool) {
+    return value;
+  }
+  final text = value.toString().trim().toLowerCase();
+  if (text == 'true' || text == '1') {
+    return true;
+  }
+  if (text == 'false' || text == '0') {
+    return false;
+  }
+  return null;
 }
 
 String firstNonEmptyString(

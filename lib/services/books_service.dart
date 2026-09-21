@@ -48,6 +48,7 @@ class BooksService {
         .whereType<Map>()
         .map((item) => BookItem.fromJson(Map<String, dynamic>.from(item)))
         .map((item) => labelItem(item, _sourceHint(sourceId, type: sourceType)))
+        .where(isListableBookItem)
         .toList();
   }
 
@@ -71,9 +72,10 @@ class BooksService {
     String? selectedHref,
   }) {
     final catalog = followed ?? root;
+    final items = listableBookItems(catalog.entries);
     return PagedResult(
-      items: catalog.entries,
-      hasMore: catalog.nextHref.isNotEmpty && catalog.entries.isNotEmpty,
+      items: items,
+      hasMore: catalog.nextHref.isNotEmpty && items.isNotEmpty,
       nextToken: catalog.nextHref,
     );
   }
@@ -185,7 +187,7 @@ class BooksService {
           sourceType: byId[sourceId]?.type ?? '',
         );
         return PagedResult(
-          items: attachSource(result.items, byId[sourceId]),
+          items: listableBookItems(attachSource(result.items, byId[sourceId])),
           hasMore: result.hasMore,
           nextToken: result.nextToken,
         );
@@ -210,7 +212,7 @@ class BooksService {
           sourceType: byId[sourceId]?.type ?? '',
         );
         return PagedResult(
-          items: attachSource(items, byId[sourceId]),
+          items: listableBookItems(attachSource(items, byId[sourceId])),
           hasMore: false,
         );
       },
@@ -237,7 +239,7 @@ class BooksService {
         .whereType<Map>()
         .map((item) => BookItem.fromJson(Map<String, dynamic>.from(item)))
         .map((item) => labelItem(item, _sourceHint(sourceId, type: sourceType)))
-        .where(isReadableBookItem)
+        .where(isListableBookItem)
         .toList();
     final navigation = (response.data!['navigation'] as List? ?? [])
         .whereType<Map>()
