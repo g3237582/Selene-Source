@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../models/manga.dart';
 import '../services/manga_service.dart';
 import '../services/theme_service.dart';
+import '../search/all_source_search.dart';
 import '../search/search_page_merge.dart';
 import '../utils/font_utils.dart';
 import '../utils/paged_list.dart';
@@ -82,16 +83,6 @@ class _MangaScreenState extends State<MangaScreen> {
       return;
     }
     final query = _searchController.text.trim();
-    if (query.isEmpty && _sourceId == null) {
-      setState(() {
-        _loading = false;
-        _error = null;
-        _page = const PagedListState();
-      });
-      _loadingMore.value = false;
-      return;
-    }
-
     final generation = reset ? ++_discoverGeneration : _discoverGeneration;
     final merge = SearchPageMerge<MangaItem>(reset: reset);
     if (reset) {
@@ -107,6 +98,35 @@ class _MangaScreenState extends State<MangaScreen> {
     try {
       late final PagedResult<MangaItem> result;
       if (query.isEmpty) {
+        if (_sourceId == null) {
+          final aggregated = await MangaService.recommendAll(
+            sources: _sources,
+            pages: reset ? const {} : _allSourcePages,
+            onPartial: (partial) {
+              if (!mounted || generation != _discoverGeneration) {
+                return;
+              }
+              setState(() {
+                _page = merge.absorb(_page, partial.items);
+                _loading = false;
+                _error = null;
+              });
+            },
+          );
+          if (!mounted || generation != _discoverGeneration) return;
+          _allSourcePages = aggregated.nextPages;
+          if (aggregated.recommendErrorMessage != null &&
+              aggregated.items.isEmpty &&
+              !merge.replaced) {
+            throw Exception(aggregated.recommendErrorMessage);
+          }
+          setState(() {
+            _page = merge.complete(_page, aggregated);
+            _loading = false;
+            _error = null;
+          });
+          return;
+        }
         result = await MangaService.recommend(
           sourceId: _sourceId!,
           page: reset ? 1 : _page.nextPage,
@@ -297,7 +317,10 @@ class _MangaScreenState extends State<MangaScreen> {
       hasMore: _page.hasMore,
       loadingMore: _loadingMore,
       emptyLabel: query.isEmpty
-          ? (_sourceId == null ? '输入关键词进行全源搜索' : '暂无漫画')
+          ? AllSourceSearch.homeEmptyLabel(
+              kind: AllSourceHomeKind.manga,
+              allSources: _sourceId == null,
+            )
           : '未找到相关漫画',
       onLoadMore: () => _loadDiscover(reset: false),
       onTap: _openManga,

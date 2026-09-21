@@ -164,4 +164,91 @@ void main() {
       ]);
     });
   });
+
+  group('AllSourceSearch.fetchCursors', () {
+    test('uses recommend copy when no catalog sources are available', () async {
+      final page = await AllSourceSearch.fetchCursors<String>(
+        sourceIds: const [],
+        fetch: (id, cursor) async => throw StateError('should not run'),
+      );
+
+      expect(page.items, isEmpty);
+      expect(page.errorMessage, AllSourceSearch.noSourcesMessage);
+      expect(
+        page.recommendErrorMessage,
+        AllSourceSearch.noRecommendSourcesMessage,
+      );
+    });
+
+    test('queries every source with an empty cursor on the first page', () async {
+      final calls = <String>[];
+      final page = await AllSourceSearch.fetchCursors<String>(
+        sourceIds: const ['a', 'b'],
+        fetch: (id, cursor) async {
+          calls.add('$id:${cursor.isEmpty ? 'root' : cursor}');
+          return PagedResult(
+            items: ['$id-1'],
+            hasMore: id == 'b',
+            nextToken: id == 'b' ? 'b-next' : '',
+          );
+        },
+      );
+
+      expect(calls, ['a:root', 'b:root']);
+      expect(page.items, ['a-1', 'b-1']);
+      expect(page.nextTokens, {'b': 'b-next'});
+      expect(page.hasMore, isTrue);
+      expect(page.recommendErrorMessage, isNull);
+    });
+
+    test('load more only follows sources that returned a next token', () async {
+      final calls = <String>[];
+      final page = await AllSourceSearch.fetchCursors<String>(
+        sourceIds: const ['a', 'b', 'c'],
+        cursors: const {'a': 'a2', 'c': 'c3'},
+        fetch: (id, cursor) async {
+          calls.add('$id:$cursor');
+          return PagedResult(
+            items: ['$id-$cursor'],
+            hasMore: id == 'c',
+            nextToken: id == 'c' ? 'c4' : '',
+          );
+        },
+      );
+
+      expect(calls, ['a:a2', 'c:c3']);
+      expect(page.items, ['a-a2', 'c-c3']);
+      expect(page.nextTokens, {'c': 'c4'});
+    });
+
+    test('keeps other sources when one catalog feed fails', () async {
+      final page = await AllSourceSearch.fetchCursors<String>(
+        sourceIds: const ['a', 'b', 'c'],
+        fetch: (id, cursor) async {
+          if (id == 'b') {
+            throw Exception('timeout');
+          }
+          return PagedResult(items: ['$id-1'], hasMore: false);
+        },
+      );
+
+      expect(page.items, ['a-1', 'c-1']);
+      expect(page.failedSourceIds, ['b']);
+      expect(page.recommendErrorMessage, isNull);
+    });
+
+    test('reports recommend allFailed when every source throws', () async {
+      final page = await AllSourceSearch.fetchCursors<String>(
+        sourceIds: const ['a', 'b'],
+        fetch: (id, cursor) async => throw Exception('down'),
+      );
+
+      expect(page.items, isEmpty);
+      expect(page.allFailed, isTrue);
+      expect(
+        page.recommendErrorMessage,
+        AllSourceSearch.allRecommendFailedMessage,
+      );
+    });
+  });
 }

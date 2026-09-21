@@ -90,6 +90,25 @@ class BookItem {
   }
 
   String get shelfKey => '$sourceId+$id';
+
+  BookItem withSource(BookSource source) {
+    final resolvedId = sourceId.isEmpty ? source.id : sourceId;
+    final resolvedName = sourceName.isEmpty ? source.name : sourceName;
+    if (resolvedId == sourceId && resolvedName == sourceName) {
+      return this;
+    }
+    return BookItem(
+      id: id,
+      sourceId: resolvedId,
+      sourceName: resolvedName,
+      title: title,
+      author: author,
+      cover: cover,
+      summary: summary,
+      detailHref: detailHref,
+      format: format,
+    );
+  }
 }
 
 class BookNavLink {

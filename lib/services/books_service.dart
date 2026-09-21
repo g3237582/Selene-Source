@@ -55,6 +55,105 @@ class BooksService {
     ];
   }
 
+  static List<BookSource> catalogSources(List<BookSource> sources) {
+    return [
+      for (final source in sources)
+        if (source.catalogSupported && source.id.isNotEmpty) source,
+    ];
+  }
+
+  static PagedResult<BookItem> homeCatalogResult({
+    required BookCatalog root,
+    BookCatalog? followed,
+    String? selectedHref,
+  }) {
+    final catalog = followed ?? root;
+    return PagedResult(
+      items: catalog.entries,
+      hasMore: catalog.nextHref.isNotEmpty && catalog.entries.isNotEmpty,
+      nextToken: catalog.nextHref,
+    );
+  }
+
+  static Future<({BookCatalog catalog, String? selectedHref})>
+      fetchDiscoverCatalog({
+    required String sourceId,
+    required String catalogHref,
+    required String nextHref,
+    required bool firstBatch,
+  }) async {
+    if (!firstBatch) {
+      return (
+        catalog: await catalog(sourceId: sourceId, href: nextHref),
+        selectedHref: null,
+      );
+    }
+    if (catalogHref.isEmpty) {
+      final root = await catalog(sourceId: sourceId, href: '');
+      final autoHref = resolveDefaultBookCatalogHref(
+        entries: root.entries,
+        navigation: root.navigation,
+      );
+      if (autoHref != null) {
+        final page = await catalog(sourceId: sourceId, href: autoHref);
+        return (
+          catalog: BookCatalog(
+            entries: page.entries,
+            navigation: root.navigation,
+            nextHref: page.nextHref,
+          ),
+          selectedHref: autoHref,
+        );
+      }
+      return (catalog: root, selectedHref: null);
+    }
+    return (
+      catalog: await catalog(sourceId: sourceId, href: catalogHref),
+      selectedHref: null,
+    );
+  }
+
+  static Future<PagedResult<BookItem>> homeCatalogPage({
+    required String sourceId,
+    String href = '',
+  }) async {
+    final fetched = await fetchDiscoverCatalog(
+      sourceId: sourceId,
+      catalogHref: href,
+      nextHref: href,
+      firstBatch: href.isEmpty,
+    );
+    return homeCatalogResult(root: fetched.catalog);
+  }
+
+  static Future<AllSourcePage<BookItem>> recommendAll({
+    required List<BookSource> sources,
+    Map<String, String> nextHrefs = const {},
+    void Function(AllSourcePage<BookItem> partial)? onPartial,
+  }) {
+    final catalog = catalogSources(sources);
+    final byId = {for (final source in catalog) source.id: source};
+    return AllSourceSearch.fetchCursors(
+      sourceIds: [for (final source in catalog) source.id],
+      cursors: nextHrefs,
+      onPartial: onPartial,
+      fetch: (sourceId, cursor) async {
+        final result = await homeCatalogPage(sourceId: sourceId, href: cursor);
+        final source = byId[sourceId];
+        if (source == null) {
+          return result;
+        }
+        return PagedResult(
+          items: [
+            for (final item in result.items) item.withSource(source),
+          ],
+          hasMore: result.hasMore,
+          nextToken: result.nextToken,
+        );
+      },
+    );
+  }
+
   static Future<AllSourcePage<BookItem>> searchAll({
     required String query,
     required List<BookSource> sources,

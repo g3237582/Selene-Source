@@ -53,6 +53,24 @@ class MangaItem {
   }
 
   String get shelfKey => '$sourceId+$id';
+
+  MangaItem withSource(MangaSource source) {
+    final resolvedId = sourceId.isEmpty ? source.id : sourceId;
+    final resolvedName = sourceName.isEmpty ? source.name : sourceName;
+    if (resolvedId == sourceId && resolvedName == sourceName) {
+      return this;
+    }
+    return MangaItem(
+      id: id,
+      sourceId: resolvedId,
+      sourceName: resolvedName,
+      title: title,
+      cover: cover,
+      description: description,
+      author: author,
+      status: status,
+    );
+  }
 }
 
 class MangaChapter {

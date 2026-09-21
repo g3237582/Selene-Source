@@ -74,6 +74,47 @@ class MangaService {
     );
   }
 
+  static List<String> recommendSourceIds(List<MangaSource> sources) {
+    final seen = <String>{};
+    final ids = <String>[];
+    for (final source in sources) {
+      if (source.id.isEmpty || !seen.add(source.id)) {
+        continue;
+      }
+      ids.add(source.id);
+    }
+    return ids;
+  }
+
+  static Future<AllSourcePage<MangaItem>> recommendAll({
+    required List<MangaSource> sources,
+    Map<String, int> pages = const {},
+    void Function(AllSourcePage<MangaItem> partial)? onPartial,
+  }) {
+    final byId = {
+      for (final source in sources)
+        if (source.id.isNotEmpty) source.id: source,
+    };
+    return AllSourceSearch.fetch(
+      sourceIds: recommendSourceIds(sources),
+      pages: pages,
+      onPartial: onPartial,
+      search: (sourceId, page) async {
+        final result = await recommend(sourceId: sourceId, page: page);
+        final source = byId[sourceId];
+        if (source == null) {
+          return result;
+        }
+        return PagedResult(
+          items: [
+            for (final item in result.items) item.withSource(source),
+          ],
+          hasMore: result.hasMore,
+        );
+      },
+    );
+  }
+
   static Future<PagedResult<MangaItem>> recommend({
     required String sourceId,
     int page = 1,

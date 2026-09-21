@@ -52,6 +52,18 @@ void main() {
     expect(href, isNull);
   });
 
+  test('catalogSources keeps only sources that can browse a home feed', () {
+    expect(
+      BooksService.catalogSources(const [
+        BookSource(id: 'off', name: '关闭', catalogSupported: false),
+        BookSource(id: '', name: '空', catalogSupported: true),
+        BookSource(id: 'on', name: '可浏览', catalogSupported: true),
+        BookSource(id: 'search-only', name: '仅搜索'),
+      ]).map((source) => source.id),
+      ['on'],
+    );
+  });
+
   test('searchableSources keeps only sources that can search', () {
     expect(
       BooksService.searchableSources(const [

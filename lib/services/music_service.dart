@@ -103,6 +103,56 @@ class MusicService {
     );
   }
 
+  static List<String> discoverySourceIds([List<String> sources = const []]) {
+    final raw = sources.isEmpty ? musicSourceLabels.keys : sources;
+    final seen = <String>{};
+    final ids = <String>[];
+    for (final id in raw) {
+      if (id.isEmpty || !seen.add(id)) {
+        continue;
+      }
+      ids.add(id);
+    }
+    return ids;
+  }
+
+  static Future<AllSourcePage<MusicBoard>> getBoardsAll({
+    List<String> sources = const [],
+    void Function(AllSourcePage<MusicBoard> partial)? onPartial,
+  }) {
+    return AllSourceSearch.fetch(
+      sourceIds: discoverySourceIds(sources),
+      onPartial: onPartial,
+      search: (source, _) async {
+        final boards = await getBoards(source: source);
+        return PagedResult(items: boards, hasMore: false);
+      },
+    );
+  }
+
+  static Future<AllSourcePage<MusicPlaylist>> getSongListsAll({
+    List<String> sources = const [],
+    Map<String, int> pages = const {},
+    String tagId = '',
+    String sortId = 'hot',
+    void Function(AllSourcePage<MusicPlaylist> partial)? onPartial,
+  }) {
+    return AllSourceSearch.fetch(
+      sourceIds: discoverySourceIds(sources),
+      pages: pages,
+      onPartial: onPartial,
+      search: (source, page) async {
+        final result = await getSongLists(
+          source: source,
+          tagId: tagId,
+          sortId: sortId,
+          page: page,
+        );
+        return PagedResult(items: result.items, hasMore: result.hasMore);
+      },
+    );
+  }
+
   static Future<List<MusicBoard>> getBoards({String source = 'wy'}) async {
     final data = await _getDiscovery(
       '/api/music/v2/discovery/boards',
