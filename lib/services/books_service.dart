@@ -1,4 +1,5 @@
 import '../models/book.dart';
+import '../search/all_source_search.dart';
 import '../utils/book_catalog.dart';
 import '../utils/json_records.dart';
 import '../utils/paged_list.dart';
@@ -45,6 +46,28 @@ class BooksService {
         .whereType<Map>()
         .map((item) => BookItem.fromJson(Map<String, dynamic>.from(item)))
         .toList();
+  }
+
+  static List<BookSource> searchableSources(List<BookSource> sources) {
+    return [
+      for (final source in sources)
+        if (source.searchSupported && source.id.isNotEmpty) source,
+    ];
+  }
+
+  static Future<AllSourcePage<BookItem>> searchAll({
+    required String query,
+    required List<BookSource> sources,
+  }) {
+    return AllSourceSearch.fetch(
+      sourceIds: [
+        for (final source in searchableSources(sources)) source.id,
+      ],
+      search: (sourceId, _) async {
+        final items = await search(query: query, sourceId: sourceId);
+        return PagedResult(items: items, hasMore: false);
+      },
+    );
   }
 
   static Future<BookCatalog> catalog({

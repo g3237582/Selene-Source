@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:selene/models/book.dart';
+import 'package:selene/services/books_service.dart';
 import 'package:selene/utils/book_catalog.dart';
 
 void main() {
@@ -49,6 +50,17 @@ void main() {
       ],
     );
     expect(href, isNull);
+  });
+
+  test('searchableSources keeps only sources that can search', () {
+    expect(
+      BooksService.searchableSources(const [
+        BookSource(id: 'off', name: '关闭', searchSupported: false),
+        BookSource(id: '', name: '空'),
+        BookSource(id: 'on', name: '可搜'),
+      ]).map((source) => source.id),
+      ['on'],
+    );
   });
 
   test('catalog entries without author or cover are hidden', () {
