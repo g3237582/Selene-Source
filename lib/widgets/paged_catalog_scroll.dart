@@ -72,6 +72,9 @@ class _PagedCatalogScrollState extends State<PagedCatalogScroll> {
   }
 
   void _onBusyChanged() {
+    if (mounted) {
+      setState(() {});
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _onScroll());
   }
 
@@ -89,7 +92,7 @@ class _PagedCatalogScrollState extends State<PagedCatalogScroll> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.itemCount <= 0) {
+    if (widget.itemCount <= 0 && !_isBusy) {
       return widget.empty ?? const SizedBox.shrink();
     }
 
@@ -98,17 +101,18 @@ class _PagedCatalogScrollState extends State<PagedCatalogScroll> {
       physics: const AlwaysScrollableScrollPhysics(),
       cacheExtent: 280,
       slivers: [
-        SliverPadding(
-          padding: widget.padding,
-          sliver: widget.gridDelegate == null
-              ? SliverList(
-                  delegate: _itemDelegate(),
-                )
-              : SliverGrid(
-                  gridDelegate: widget.gridDelegate!,
-                  delegate: _itemDelegate(),
-                ),
-        ),
+        if (widget.itemCount > 0)
+          SliverPadding(
+            padding: widget.padding,
+            sliver: widget.gridDelegate == null
+                ? SliverList(
+                    delegate: _itemDelegate(),
+                  )
+                : SliverGrid(
+                    gridDelegate: widget.gridDelegate!,
+                    delegate: _itemDelegate(),
+                  ),
+          ),
         SliverToBoxAdapter(
           child: widget.loadingMoreListenable == null
               ? PagedCatalogLoadFooter(visible: widget.loadingMore)

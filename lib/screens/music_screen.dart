@@ -5,6 +5,7 @@ import '../models/music_discovery.dart';
 import '../models/music_track.dart';
 import '../services/music_player_service.dart';
 import '../services/music_service.dart';
+import '../search/search_page_merge.dart';
 import '../services/theme_service.dart';
 import '../utils/font_utils.dart';
 import '../utils/paged_list.dart';
@@ -169,16 +170,14 @@ class _MusicScreenState extends State<MusicScreen> {
     }
 
     final generation = reset ? ++_searchGeneration : _searchGeneration;
+    final merge = SearchPageMerge<MusicTrack>(reset: reset);
     if (reset) {
       setState(() {
         _searching = true;
-        _searchPage = const PagedListState();
         _error = null;
       });
-      _loadingMore.value = false;
-    } else {
-      _loadingMore.value = true;
     }
+    _loadingMore.value = true;
 
     try {
       late final PagedResult<MusicTrack> result;
@@ -186,13 +185,29 @@ class _MusicScreenState extends State<MusicScreen> {
         final aggregated = await MusicService.searchAll(
           query: query,
           pages: reset ? const {} : _allSourcePages,
+          onPartial: (partial) {
+            if (!mounted || generation != _searchGeneration) {
+              return;
+            }
+            setState(() {
+              _searchPage = merge.absorb(_searchPage, partial.items);
+              _searching = false;
+              _error = null;
+            });
+          },
         );
         if (!mounted || generation != _searchGeneration) return;
         _allSourcePages = aggregated.nextPages;
-        if (aggregated.errorMessage != null && aggregated.items.isEmpty) {
+        if (aggregated.errorMessage != null &&
+            aggregated.items.isEmpty &&
+            !merge.replaced) {
           throw Exception(aggregated.errorMessage);
         }
-        result = aggregated.toPagedResult();
+        setState(() {
+          _searchPage = merge.complete(_searchPage, aggregated);
+          _searching = false;
+        });
+        return;
       } else {
         result = await MusicService.search(
           query: query,
@@ -445,7 +460,10 @@ class _MusicScreenState extends State<MusicScreen> {
   }
 
   Widget _buildSearch(MusicPlayerService player, Color muted) {
-    if (_searching && _searchPage.items.isEmpty) {
+    if (shouldReplaceCatalogWithLoader(
+      loading: _searching,
+      itemCount: _searchPage.items.length,
+    )) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_error != null && _searchPage.items.isEmpty) {

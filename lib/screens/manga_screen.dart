@@ -1,31 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../manga/manga_progress.dart';
 import '../models/manga.dart';
 import '../services/manga_service.dart';
 import '../services/theme_service.dart';
+import '../search/search_page_merge.dart';
 import '../utils/font_utils.dart';
 import '../utils/paged_list.dart';
 import '../widgets/authenticated_image.dart';
+import '../widgets/manga_library.dart';
 import '../widgets/paged_catalog_scroll.dart';
 import '../widgets/source_filter_bar.dart';
 import 'manga_detail_screen.dart';
 
 typedef _OpenManga = void Function(MangaItem item, {bool resumeIfPossible});
-String _shelfProgressLabel(
-  MangaShelfItem item,
-  List<MangaReadRecord> history,
-) {
-  final progress = findMangaProgress(history, item.sourceId, item.mangaId);
-  if (progress != null) {
-    return mangaProgressLabel(progress);
-  }
-  if (item.lastChapterName.isEmpty) {
-    return item.sourceName;
-  }
-  return item.lastChapterName;
-}
 
 class MangaScreen extends StatefulWidget {
   const MangaScreen({super.key});
@@ -105,16 +93,16 @@ class _MangaScreenState extends State<MangaScreen> {
     }
 
     final generation = reset ? ++_discoverGeneration : _discoverGeneration;
+    final merge = SearchPageMerge<MangaItem>(reset: reset);
     if (reset) {
       setState(() {
-        _loading = true;
-        _page = const PagedListState();
         _error = null;
+        if (_page.items.isEmpty) {
+          _loading = true;
+        }
       });
-      _loadingMore.value = false;
-    } else {
-      _loadingMore.value = true;
     }
+    _loadingMore.value = true;
 
     try {
       late final PagedResult<MangaItem> result;
@@ -128,13 +116,30 @@ class _MangaScreenState extends State<MangaScreen> {
           query: query,
           sources: _sources,
           pages: reset ? const {} : _allSourcePages,
+          onPartial: (partial) {
+            if (!mounted || generation != _discoverGeneration) {
+              return;
+            }
+            setState(() {
+              _page = merge.absorb(_page, partial.items);
+              _loading = false;
+              _error = null;
+            });
+          },
         );
         if (!mounted || generation != _discoverGeneration) return;
         _allSourcePages = aggregated.nextPages;
-        if (aggregated.errorMessage != null && aggregated.items.isEmpty) {
+        if (aggregated.errorMessage != null &&
+            aggregated.items.isEmpty &&
+            !merge.replaced) {
           throw Exception(aggregated.errorMessage);
         }
-        result = aggregated.toPagedResult();
+        setState(() {
+          _page = merge.complete(_page, aggregated);
+          _loading = false;
+          _error = null;
+        });
+        return;
       } else {
         result = await MangaService.search(
           query: query,
@@ -264,14 +269,17 @@ class _MangaScreenState extends State<MangaScreen> {
         Expanded(
           child: _tab == 0
               ? _buildDiscover(muted)
-              : _MangaLibrary(shelf: _shelf, history: _history, onTap: _openManga),
+              : MangaLibraryPane(shelf: _shelf, history: _history, onTap: _openManga),
         ),
       ],
     );
   }
 
   Widget _buildDiscover(Color muted) {
-    if (_loading && _page.items.isEmpty) {
+    if (shouldReplaceCatalogWithLoader(
+      loading: _loading,
+      itemCount: _page.items.length,
+    )) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_error != null && _page.items.isEmpty) {
@@ -394,107 +402,6 @@ class _MangaGrid extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _MangaLibrary extends StatelessWidget {
-  final List<MangaShelfItem> shelf;
-  final List<MangaReadRecord> history;
-  final _OpenManga onTap;
-
-  const _MangaLibrary({
-    required this.shelf,
-    required this.history,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomScrollView(
-      slivers: [
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          sliver: SliverToBoxAdapter(
-            child: Text('书架', style: FontUtils.poppins(fontWeight: FontWeight.w600)),
-          ),
-        ),
-        if (shelf.isEmpty)
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            sliver: SliverToBoxAdapter(
-              child: Text('书架是空的', style: FontUtils.poppins(color: const Color(0xFF7f8c8d))),
-            ),
-          )
-        else
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            sliver: SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final item = shelf[index];
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: SizedBox(
-                      width: 48,
-                      height: 64,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: AuthenticatedImage(url: item.cover),
-                      ),
-                    ),
-                    title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    subtitle: Text(
-                      _shelfProgressLabel(item, history),
-                      maxLines: 1,
-                    ),
-                    onTap: () => onTap(item.toItem()),
-                  );
-                },
-                childCount: shelf.length,
-              ),
-            ),
-          ),
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          sliver: SliverToBoxAdapter(
-            child: Text('阅读历史', style: FontUtils.poppins(fontWeight: FontWeight.w600)),
-          ),
-        ),
-        if (history.isEmpty)
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-            sliver: SliverToBoxAdapter(
-              child: Text('暂无历史', style: FontUtils.poppins(color: const Color(0xFF7f8c8d))),
-            ),
-          )
-        else
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-            sliver: SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final item = history[index];
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: SizedBox(
-                      width: 48,
-                      height: 64,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: AuthenticatedImage(url: item.cover),
-                      ),
-                    ),
-                    title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    subtitle: Text(mangaProgressLabel(item), maxLines: 1),
-                    onTap: () => onTap(item.toItem(), resumeIfPossible: true),
-                  );
-                },
-                childCount: history.length,
-              ),
-            ),
-          ),
-      ],
     );
   }
 }

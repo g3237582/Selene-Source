@@ -58,11 +58,13 @@ class BooksService {
   static Future<AllSourcePage<BookItem>> searchAll({
     required String query,
     required List<BookSource> sources,
+    void Function(AllSourcePage<BookItem> partial)? onPartial,
   }) {
     return AllSourceSearch.fetch(
       sourceIds: [
         for (final source in searchableSources(sources)) source.id,
       ],
+      onPartial: onPartial,
       search: (sourceId, _) async {
         final items = await search(query: query, sourceId: sourceId);
         return PagedResult(items: items, hasMore: false);

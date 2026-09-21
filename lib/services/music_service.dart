@@ -44,10 +44,12 @@ class MusicService {
     required String query,
     List<String> sources = const [],
     Map<String, int> pages = const {},
+    void Function(AllSourcePage<MusicTrack> partial)? onPartial,
   }) {
     return AllSourceSearch.fetch(
       sourceIds: sources.isEmpty ? musicSourceLabels.keys.toList() : sources,
       pages: pages,
+      onPartial: onPartial,
       search: (source, page) => search(
         query: query,
         source: source,

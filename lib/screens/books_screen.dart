@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../models/book.dart';
 import '../services/books_service.dart';
 import '../services/theme_service.dart';
+import '../search/search_page_merge.dart';
 import '../utils/book_catalog.dart';
 import '../utils/font_utils.dart';
 import '../utils/paged_list.dart';
@@ -103,16 +104,16 @@ class _BooksScreenState extends State<BooksScreen> {
     }
 
     final generation = reset ? ++_discoverGeneration : _discoverGeneration;
+    final merge = SearchPageMerge<BookItem>(reset: reset);
     if (reset) {
       setState(() {
-        _loading = true;
-        _page = const PagedListState();
         _error = null;
+        if (_page.items.isEmpty) {
+          _loading = true;
+        }
       });
-      _loadingMore.value = false;
-    } else {
-      _loadingMore.value = true;
     }
+    _loadingMore.value = true;
 
     try {
       late final PagedResult<BookItem> result;
@@ -121,12 +122,29 @@ class _BooksScreenState extends State<BooksScreen> {
           final aggregated = await BooksService.searchAll(
             query: query,
             sources: _sources,
+            onPartial: (partial) {
+              if (!mounted || generation != _discoverGeneration) {
+                return;
+              }
+              setState(() {
+                _page = merge.absorb(_page, partial.items);
+                _loading = false;
+                _error = null;
+              });
+            },
           );
           if (!mounted || generation != _discoverGeneration) return;
-          if (aggregated.errorMessage != null && aggregated.items.isEmpty) {
+          if (aggregated.errorMessage != null &&
+              aggregated.items.isEmpty &&
+              !merge.replaced) {
             throw Exception(aggregated.errorMessage);
           }
-          result = aggregated.toPagedResult();
+          setState(() {
+            _page = merge.complete(_page, aggregated);
+            _loading = false;
+            _error = null;
+          });
+          return;
         } else {
           final items = await BooksService.search(
             query: query,
@@ -341,7 +359,10 @@ class _BooksScreenState extends State<BooksScreen> {
   }
 
   Widget _buildDiscover(Color muted) {
-    if (_loading && _page.items.isEmpty) {
+    if (shouldReplaceCatalogWithLoader(
+      loading: _loading,
+      itemCount: _page.items.length,
+    )) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_error != null && _page.items.isEmpty) {

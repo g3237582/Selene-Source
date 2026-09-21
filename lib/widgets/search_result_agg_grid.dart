@@ -19,6 +19,7 @@ class SearchResultAggGrid extends StatefulWidget {
   final Function(SearchResult)? onSourceSelected;
   final bool hasReceivedStart;
   final Map<String, String> posterHashes;
+  final ScrollController? controller;
 
   const SearchResultAggGrid({
     super.key,
@@ -29,6 +30,7 @@ class SearchResultAggGrid extends StatefulWidget {
     this.onSourceSelected,
     required this.hasReceivedStart,
     this.posterHashes = const {},
+    this.controller,
   });
 
   @override
@@ -58,7 +60,7 @@ class _SearchResultAggGridState extends State<SearchResultAggGrid>
     super.didUpdateWidget(oldWidget);
     if (widget.results != oldWidget.results ||
         widget.posterHashes != oldWidget.posterHashes) {
-      setState(_rebuildAggregatedResults);
+      _rebuildAggregatedResults();
     }
   }
 
@@ -105,6 +107,7 @@ class _SearchResultAggGridState extends State<SearchResultAggGrid>
         final double itemHeight = itemWidth * 2.0; // 增加高度比例，确保有足够空间避免溢出
         
         return GridView.builder(
+          controller: widget.controller,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: crossAxisCount,
@@ -117,23 +120,19 @@ class _SearchResultAggGridState extends State<SearchResultAggGrid>
             final key = _orderedKeys[index];
             final aggregatedResult = _aggregatedResults[key]!;
             final videoInfo = aggregatedResult.toVideoInfo();
-            
-            return AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOut,
-              child: VideoCard(
-                key: ValueKey(key), // 使用聚合键作为唯一key
-                videoInfo: videoInfo,
-                onTap: widget.onVideoTap != null ? () => widget.onVideoTap!(videoInfo) : null,
-                from: 'agg', // 标记为聚合卡片
-                cardWidth: itemWidth, // 传递计算出的宽度
-                onGlobalMenuAction: widget.onGlobalMenuAction != null 
-                    ? (action) => widget.onGlobalMenuAction!(videoInfo, action)
-                    : null,
-                isFavorited: false, // 聚合卡片不显示收藏状态
-                originalResults: aggregatedResult.originalResults,
-                onSourceSelected: widget.onSourceSelected,
-              ),
+
+            return VideoCard(
+              key: ValueKey(key), // 使用聚合键作为唯一key
+              videoInfo: videoInfo,
+              onTap: widget.onVideoTap != null ? () => widget.onVideoTap!(videoInfo) : null,
+              from: 'agg', // 标记为聚合卡片
+              cardWidth: itemWidth, // 传递计算出的宽度
+              onGlobalMenuAction: widget.onGlobalMenuAction != null 
+                  ? (action) => widget.onGlobalMenuAction!(videoInfo, action)
+                  : null,
+              isFavorited: false, // 聚合卡片不显示收藏状态
+              originalResults: aggregatedResult.originalResults,
+              onSourceSelected: widget.onSourceSelected,
             );
           },
         );
@@ -146,10 +145,10 @@ class _SearchResultAggGridState extends State<SearchResultAggGrid>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
+          const Icon(
             Icons.search_off,
             size: 80,
-            color: const Color(0xFFbdc3c7),
+            color: Color(0xFFbdc3c7),
           ),
           const SizedBox(height: 24),
           Text(
