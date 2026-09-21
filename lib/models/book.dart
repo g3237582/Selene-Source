@@ -31,6 +31,7 @@ class BookItem {
   final String id;
   final String sourceId;
   final String sourceName;
+  final String sourceType;
   final String title;
   final String author;
   final String cover;
@@ -43,6 +44,7 @@ class BookItem {
     required this.sourceId,
     required this.sourceName,
     required this.title,
+    this.sourceType = '',
     this.author = '',
     this.cover = '',
     this.summary = '',
@@ -67,7 +69,8 @@ class BookItem {
       ]),
       sourceId: firstNonEmptyString([json['sourceId']]),
       sourceName: firstNonEmptyString([json['sourceName']]),
-      title: firstNonEmptyString([json['title']]),
+      sourceType: _sourceTypeFromJson(json),
+      title: preferredBookTitle([json['title'], json['name']]),
       author: firstNonEmptyString([json['author']]),
       cover: firstNonEmptyString([json['cover']]),
       summary: firstNonEmptyString([json['summary']]),
@@ -105,13 +108,17 @@ class BookItem {
   BookItem withSource(BookSource source) {
     final resolvedId = sourceId.isEmpty ? source.id : sourceId;
     final resolvedName = sourceName.isEmpty ? source.name : sourceName;
-    if (resolvedId == sourceId && resolvedName == sourceName) {
+    final resolvedType = sourceType.isEmpty ? source.type : sourceType;
+    if (resolvedId == sourceId &&
+        resolvedName == sourceName &&
+        resolvedType == sourceType) {
       return this;
     }
     return BookItem(
       id: id,
       sourceId: resolvedId,
       sourceName: resolvedName,
+      sourceType: resolvedType,
       title: title,
       author: author,
       cover: cover,
@@ -120,6 +127,42 @@ class BookItem {
       format: format,
     );
   }
+}
+
+bool isPlaceholderBookTitle(String? title) {
+  final text = title?.trim() ?? '';
+  if (text.isEmpty) {
+    return true;
+  }
+  return text == '未命名电子书' ||
+      text == '未命名' ||
+      text.toLowerCase() == 'untitled';
+}
+
+String preferredBookTitle(Iterable<Object?> values) {
+  var placeholder = '';
+  for (final value in values) {
+    final text = firstNonEmptyString([value]);
+    if (text.isEmpty) {
+      continue;
+    }
+    if (!isPlaceholderBookTitle(text)) {
+      return text;
+    }
+    if (placeholder.isEmpty) {
+      placeholder = text;
+    }
+  }
+  return placeholder;
+}
+
+String _sourceTypeFromJson(Map<String, dynamic> json) {
+  final explicit = firstNonEmptyString([json['sourceType']]);
+  if (explicit.isNotEmpty) {
+    return explicit;
+  }
+  final type = firstNonEmptyString([json['type']]).toLowerCase();
+  return type == 'opds' || type == 'legado' ? type : '';
 }
 
 String firstNonEmptyString(

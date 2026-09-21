@@ -47,6 +47,18 @@ class _BooksScreenState extends State<BooksScreen> {
     return _sources.isNotEmpty ? _sources.first.id : null;
   }
 
+  String _sourceTypeFor(String? sourceId) {
+    if (sourceId == null || sourceId.isEmpty) {
+      return '';
+    }
+    for (final source in _sources) {
+      if (source.id == sourceId) {
+        return source.type;
+      }
+    }
+    return '';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -139,6 +151,7 @@ class _BooksScreenState extends State<BooksScreen> {
           final items = await BooksService.search(
             query: query,
             sourceId: _sourceId,
+            sourceType: _sourceTypeFor(_sourceId),
           );
           result = PagedResult(items: items, hasMore: false);
         }
@@ -215,6 +228,7 @@ class _BooksScreenState extends State<BooksScreen> {
       catalogHref: _catalogHref,
       nextHref: _page.nextToken,
       firstBatch: firstBatch,
+      sourceType: _sourceTypeFor(_browseSourceId),
     );
   }
 
