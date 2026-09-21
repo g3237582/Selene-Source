@@ -4,8 +4,8 @@ import 'package:provider/provider.dart';
 import '../models/book.dart';
 import '../services/books_service.dart';
 import '../services/theme_service.dart';
+import '../utils/book_chapter.dart';
 import '../utils/font_utils.dart';
-import '../utils/html_text.dart';
 
 class BookReaderScreen extends StatefulWidget {
   final BookItem book;
@@ -46,7 +46,7 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
     });
     try {
       final local = widget.localContents[_chapter.href];
-      final content = local ??
+      final raw = local ??
           (await BooksService.getChapter(
             book: widget.book,
             chapter: _chapter,
@@ -54,14 +54,24 @@ class _BookReaderScreenState extends State<BookReaderScreen> {
               .content;
       await BooksService.saveHistory(book: widget.book, chapter: _chapter);
       if (!mounted) return;
+      final view = inspectChapterBody(raw);
       setState(() {
-        _content = stripHtml(content);
+        if (view.kind == ChapterBodyKind.text) {
+          _content = view.displayText;
+          _error = null;
+        } else if (view.kind == ChapterBodyKind.empty) {
+          _content = '';
+          _error = null;
+        } else {
+          _content = '';
+          _error = view.message;
+        }
         _loading = false;
       });
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _error = error.toString().replaceFirst('Exception: ', '');
+        _error = bookChapterErrorMessage(error, widget.book);
         _loading = false;
       });
     }
