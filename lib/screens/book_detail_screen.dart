@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/book.dart';
 import '../services/books_service.dart';
+import '../utils/book_catalog.dart';
 import '../utils/font_utils.dart';
 import '../widgets/authenticated_image.dart';
 import 'book_reader_screen.dart';
@@ -146,7 +147,7 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Text(
-                  _error ?? '该书暂不支持章节阅读。EPUB 文件流会在后续版本接入。',
+                  _error ?? bookEmptyChaptersMessage(_book),
                 ),
               ),
             )

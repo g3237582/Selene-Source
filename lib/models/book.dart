@@ -52,19 +52,30 @@ class BookItem {
 
   factory BookItem.fromJson(Map<String, dynamic> json) {
     final acquisition = _firstAcquisition(json);
+    final rawHref = firstNonEmptyString([
+      json['detailHref'],
+      json['bookUrl'],
+      json['href'],
+      acquisition.href,
+    ]);
+    final detailHref = isBookDetailHref(rawHref) ? rawHref : '';
     return BookItem(
-      id: json['id']?.toString() ?? json['bookId']?.toString() ?? '',
-      sourceId: json['sourceId']?.toString() ?? '',
-      sourceName: json['sourceName']?.toString() ?? '',
-      title: json['title']?.toString() ?? '',
-      author: json['author']?.toString() ?? '',
-      cover: json['cover']?.toString() ?? '',
-      summary: json['summary']?.toString() ?? '',
-      detailHref: (json['detailHref'] ?? json['href'] ?? acquisition.href)
-          .toString(),
-      format: json['format']?.toString().isNotEmpty == true
-          ? json['format'].toString()
-          : acquisition.format,
+      id: firstNonEmptyString([
+        json['bookId'],
+        json['id'],
+        detailHref,
+      ]),
+      sourceId: firstNonEmptyString([json['sourceId']]),
+      sourceName: firstNonEmptyString([json['sourceName']]),
+      title: firstNonEmptyString([json['title']]),
+      author: firstNonEmptyString([json['author']]),
+      cover: firstNonEmptyString([json['cover']]),
+      summary: firstNonEmptyString([json['summary']]),
+      detailHref: detailHref,
+      format: firstNonEmptyString(
+        [json['format'], acquisition.format],
+        fallback: 'chapters',
+      ),
     );
   }
 
@@ -109,6 +120,57 @@ class BookItem {
       format: format,
     );
   }
+}
+
+String firstNonEmptyString(
+  Iterable<Object?> values, {
+  String fallback = '',
+}) {
+  for (final value in values) {
+    if (value == null) {
+      continue;
+    }
+    final text = value.toString().trim();
+    if (text.isEmpty || text == 'null') {
+      continue;
+    }
+    return text;
+  }
+  return fallback;
+}
+
+bool isCatalogCursor(String value) {
+  final href = value.trim();
+  return href.startsWith('legado-explore:') ||
+      href.startsWith('legado:explore') ||
+      href.startsWith('__group__:');
+}
+
+bool isBookDetailHref(String value) {
+  final href = value.trim();
+  if (href.isEmpty || isCatalogCursor(href)) {
+    return false;
+  }
+  final lower = href.toLowerCase();
+  return lower.startsWith('http://') ||
+      lower.startsWith('https://') ||
+      href.startsWith('/');
+}
+
+/// Locator the books detail/chapters APIs can resolve.
+/// Prefer a bookUrl / detail href over a catalog JSON id.
+String resolveBookDetailLocator(BookItem book) {
+  if (isBookDetailHref(book.detailHref)) {
+    return book.detailHref.trim();
+  }
+  if (isBookDetailHref(book.id)) {
+    return book.id.trim();
+  }
+  final id = book.id.trim();
+  if (id.isEmpty || isCatalogCursor(id)) {
+    return '';
+  }
+  return id;
 }
 
 class BookNavLink {
