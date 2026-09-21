@@ -4,8 +4,8 @@ import 'package:provider/provider.dart';
 import '../models/book.dart';
 import '../services/books_service.dart';
 import '../services/theme_service.dart';
+import '../search/all_source_search.dart';
 import '../search/search_page_merge.dart';
-import '../utils/book_catalog.dart';
 import '../utils/font_utils.dart';
 import '../utils/paged_list.dart';
 import '../widgets/authenticated_image.dart';
@@ -27,6 +27,7 @@ class _BooksScreenState extends State<BooksScreen> {
   List<BookNavLink> _navigation = [];
   String? _sourceId;
   String _catalogHref = '';
+  Map<String, String> _allSourceHrefs = const {};
   PagedListState<BookItem> _page = const PagedListState();
   List<BookItem> _shelf = [];
   bool _loading = true;
@@ -92,17 +93,6 @@ class _BooksScreenState extends State<BooksScreen> {
       return;
     }
     final query = _searchController.text.trim();
-    if (query.isEmpty && _sourceId == null) {
-      setState(() {
-        _loading = false;
-        _error = null;
-        _page = const PagedListState();
-        _navigation = [];
-      });
-      _loadingMore.value = false;
-      return;
-    }
-
     final generation = reset ? ++_discoverGeneration : _discoverGeneration;
     final merge = SearchPageMerge<BookItem>(reset: reset);
     if (reset) {
@@ -152,6 +142,36 @@ class _BooksScreenState extends State<BooksScreen> {
           );
           result = PagedResult(items: items, hasMore: false);
         }
+      } else if (_sourceId == null) {
+        final aggregated = await BooksService.recommendAll(
+          sources: _sources,
+          nextHrefs: reset ? const {} : _allSourceHrefs,
+          onPartial: (partial) {
+            if (!mounted || generation != _discoverGeneration) {
+              return;
+            }
+            setState(() {
+              _page = merge.absorb(_page, partial.items);
+              _loading = false;
+              _error = null;
+              _navigation = [];
+            });
+          },
+        );
+        if (!mounted || generation != _discoverGeneration) return;
+        _allSourceHrefs = aggregated.nextTokens;
+        if (aggregated.recommendErrorMessage != null &&
+            aggregated.items.isEmpty &&
+            !merge.replaced) {
+          throw Exception(aggregated.recommendErrorMessage);
+        }
+        setState(() {
+          _page = merge.complete(_page, aggregated);
+          _loading = false;
+          _error = null;
+          _navigation = [];
+        });
+        return;
       } else {
         final fetched = await _fetchCatalog(firstBatch: reset || _page.items.isEmpty);
         if (!mounted || generation != _discoverGeneration) return;
@@ -189,38 +209,12 @@ class _BooksScreenState extends State<BooksScreen> {
 
   Future<({BookCatalog catalog, String? selectedHref})> _fetchCatalog({
     required bool firstBatch,
-  }) async {
-    if (!firstBatch) {
-      return (
-        catalog: await BooksService.catalog(
-          sourceId: _browseSourceId!,
-          href: _page.nextToken,
-        ),
-        selectedHref: null,
-      );
-    }
-    if (_catalogHref.isEmpty) {
-      final root = await BooksService.catalog(sourceId: _browseSourceId!, href: '');
-      final autoHref = resolveDefaultBookCatalogHref(
-        entries: root.entries,
-        navigation: root.navigation,
-      );
-      if (autoHref != null) {
-        final page = await BooksService.catalog(sourceId: _browseSourceId!, href: autoHref);
-        return (
-          catalog: BookCatalog(
-            entries: page.entries,
-            navigation: root.navigation,
-            nextHref: page.nextHref,
-          ),
-          selectedHref: autoHref,
-        );
-      }
-      return (catalog: root, selectedHref: null);
-    }
-    return (
-      catalog: await BooksService.catalog(sourceId: _browseSourceId!, href: _catalogHref),
-      selectedHref: null,
+  }) {
+    return BooksService.fetchDiscoverCatalog(
+      sourceId: _browseSourceId!,
+      catalogHref: _catalogHref,
+      nextHref: _page.nextToken,
+      firstBatch: firstBatch,
     );
   }
 
@@ -312,6 +306,7 @@ class _BooksScreenState extends State<BooksScreen> {
               setState(() {
                 _sourceId = sourceId;
                 _catalogHref = '';
+                _allSourceHrefs = const {};
               });
               _reloadDiscover();
             },
@@ -380,7 +375,10 @@ class _BooksScreenState extends State<BooksScreen> {
       hasMore: _page.hasMore,
       loadingMore: _loadingMore,
       emptyLabel: query.isEmpty
-          ? (_sourceId == null ? '输入关键词进行全源搜索' : '暂无书籍')
+          ? AllSourceSearch.homeEmptyLabel(
+              kind: AllSourceHomeKind.book,
+              allSources: _sourceId == null,
+            )
           : '未找到相关电子书',
       onLoadMore: () => _loadDiscover(reset: false),
       onTap: _openBook,

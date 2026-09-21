@@ -179,6 +179,28 @@ List<MusicTag> parseMusicHotTags(Map<String, dynamic> payload) {
       .toList();
 }
 
+String musicBoardSubtitle(MusicBoard board, {required bool showSource}) {
+  return [
+    if (showSource) musicSourceLabel(board.source),
+    if (board.updateFrequency.isNotEmpty) board.updateFrequency,
+  ].where((item) => item.isNotEmpty).join(' · ');
+}
+
+String musicPlaylistSubtitle(
+  MusicPlaylist playlist, {
+  required bool showSource,
+}) {
+  return [
+    if (showSource) musicSourceLabel(playlist.source),
+    if (playlist.author.isNotEmpty) playlist.author,
+    if (playlist.songCount > 0) '${playlist.songCount} 首',
+  ].where((item) => item.isNotEmpty).join(' · ');
+}
+
+String musicSourceLabel(String source) {
+  return musicSourceLabels[source] ?? source;
+}
+
 MusicBoard? findBoardByName(List<MusicBoard> boards, String name) {
   final target = name.trim();
   if (target.isEmpty) {
