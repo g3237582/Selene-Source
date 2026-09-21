@@ -29,6 +29,7 @@ class BooksService {
   static Future<List<BookItem>> search({
     required String query,
     String? sourceId,
+    String sourceType = '',
   }) async {
     final response = await ApiService.get<Map<String, dynamic>>(
       '/api/books/search',
@@ -45,7 +46,7 @@ class BooksService {
     return results
         .whereType<Map>()
         .map((item) => BookItem.fromJson(Map<String, dynamic>.from(item)))
-        .map((item) => labelItem(item, _sourceHint(sourceId)))
+        .map((item) => labelItem(item, _sourceHint(sourceId, type: sourceType)))
         .toList();
   }
 
@@ -82,21 +83,34 @@ class BooksService {
     required String catalogHref,
     required String nextHref,
     required bool firstBatch,
+    String sourceType = '',
   }) async {
     if (!firstBatch) {
       return (
-        catalog: await catalog(sourceId: sourceId, href: nextHref),
+        catalog: await catalog(
+          sourceId: sourceId,
+          href: nextHref,
+          sourceType: sourceType,
+        ),
         selectedHref: null,
       );
     }
     if (catalogHref.isEmpty) {
-      final root = await catalog(sourceId: sourceId, href: '');
+      final root = await catalog(
+        sourceId: sourceId,
+        href: '',
+        sourceType: sourceType,
+      );
       final autoHref = resolveDefaultBookCatalogHref(
         entries: root.entries,
         navigation: root.navigation,
       );
       if (autoHref != null) {
-        final page = await catalog(sourceId: sourceId, href: autoHref);
+        final page = await catalog(
+          sourceId: sourceId,
+          href: autoHref,
+          sourceType: sourceType,
+        );
         return (
           catalog: BookCatalog(
             entries: page.entries,
@@ -109,7 +123,11 @@ class BooksService {
       return (catalog: root, selectedHref: null);
     }
     return (
-      catalog: await catalog(sourceId: sourceId, href: catalogHref),
+      catalog: await catalog(
+        sourceId: sourceId,
+        href: catalogHref,
+        sourceType: sourceType,
+      ),
       selectedHref: null,
     );
   }
@@ -117,21 +135,27 @@ class BooksService {
   static Future<PagedResult<BookItem>> homeCatalogPage({
     required String sourceId,
     String href = '',
+    String sourceType = '',
   }) async {
     final fetched = await fetchDiscoverCatalog(
       sourceId: sourceId,
       catalogHref: href,
       nextHref: href,
       firstBatch: href.isEmpty,
+      sourceType: sourceType,
     );
     return homeCatalogResult(root: fetched.catalog);
   }
 
-  static BookSource? _sourceHint(String? sourceId, {String sourceName = ''}) {
+  static BookSource? _sourceHint(
+    String? sourceId, {
+    String sourceName = '',
+    String type = '',
+  }) {
     if (sourceId == null || sourceId.isEmpty) {
       return null;
     }
-    return BookSource(id: sourceId, name: sourceName);
+    return BookSource(id: sourceId, name: sourceName, type: type);
   }
 
   static BookItem labelItem(BookItem item, BookSource? source) {
@@ -154,7 +178,11 @@ class BooksService {
       cursors: nextHrefs,
       onPartial: onPartial,
       fetch: (sourceId, cursor) async {
-        final result = await homeCatalogPage(sourceId: sourceId, href: cursor);
+        final result = await homeCatalogPage(
+          sourceId: sourceId,
+          href: cursor,
+          sourceType: byId[sourceId]?.type ?? '',
+        );
         return PagedResult(
           items: attachSource(result.items, byId[sourceId]),
           hasMore: result.hasMore,
@@ -175,7 +203,11 @@ class BooksService {
       sourceIds: [for (final source in searchable) source.id],
       onPartial: onPartial,
       search: (sourceId, _) async {
-        final items = await search(query: query, sourceId: sourceId);
+        final items = await search(
+          query: query,
+          sourceId: sourceId,
+          sourceType: byId[sourceId]?.type ?? '',
+        );
         return PagedResult(
           items: attachSource(items, byId[sourceId]),
           hasMore: false,
@@ -187,6 +219,7 @@ class BooksService {
   static Future<BookCatalog> catalog({
     required String sourceId,
     String href = '',
+    String sourceType = '',
   }) async {
     final response = await ApiService.get<Map<String, dynamic>>(
       '/api/books/catalog',
@@ -202,7 +235,7 @@ class BooksService {
     final entries = (response.data!['entries'] as List? ?? [])
         .whereType<Map>()
         .map((item) => BookItem.fromJson(Map<String, dynamic>.from(item)))
-        .map((item) => labelItem(item, _sourceHint(sourceId)))
+        .map((item) => labelItem(item, _sourceHint(sourceId, type: sourceType)))
         .where(isReadableBookItem)
         .toList();
     final navigation = (response.data!['navigation'] as List? ?? [])

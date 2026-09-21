@@ -36,7 +36,8 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     });
 
     final detailFuture = BooksService.getDetail(_book);
-    final chaptersFuture = BooksService.getChapters(_book);
+    final chaptersFuture =
+        shouldFetchBookChapters(_book) ? BooksService.getChapters(_book) : null;
 
     BookItem detail = _book;
     List<BookChapter> chapters = [];
@@ -45,27 +46,39 @@ class _BookDetailScreenState extends State<BookDetailScreen> {
     try {
       detail = await detailFuture;
     } catch (err) {
-      error = err.toString().replaceFirst('Exception: ', '');
+      error = bookChaptersErrorMessage(err, _book);
     }
 
-    try {
-      chapters = await chaptersFuture;
-    } catch (_) {
-      try {
-        chapters = await BooksService.getChapters(detail);
-      } catch (err) {
-        error ??= err.toString().replaceFirst('Exception: ', '');
+    if (shouldFetchBookChapters(detail)) {
+      if (chaptersFuture != null) {
+        try {
+          chapters = await chaptersFuture;
+        } catch (_) {
+          try {
+            chapters = await BooksService.getChapters(detail);
+          } catch (err) {
+            error ??= bookChaptersErrorMessage(err, detail);
+          }
+        }
+      } else {
+        try {
+          chapters = await BooksService.getChapters(detail);
+        } catch (err) {
+          error ??= bookChaptersErrorMessage(err, detail);
+        }
       }
-    }
 
-    if (chapters.isEmpty &&
-        detail.detailHref.isNotEmpty &&
-        detail.detailHref != widget.book.detailHref) {
-      try {
-        chapters = await BooksService.getChapters(detail);
-      } catch (err) {
-        error ??= err.toString().replaceFirst('Exception: ', '');
+      if (chapters.isEmpty &&
+          detail.detailHref.isNotEmpty &&
+          detail.detailHref != widget.book.detailHref) {
+        try {
+          chapters = await BooksService.getChapters(detail);
+        } catch (err) {
+          error ??= bookChaptersErrorMessage(err, detail);
+        }
       }
+    } else {
+      error = null;
     }
 
     if (!mounted) return;

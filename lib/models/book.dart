@@ -31,6 +31,7 @@ class BookItem {
   final String id;
   final String sourceId;
   final String sourceName;
+  final String sourceType;
   final String title;
   final String author;
   final String cover;
@@ -43,6 +44,7 @@ class BookItem {
     required this.sourceId,
     required this.sourceName,
     required this.title,
+    this.sourceType = '',
     this.author = '',
     this.cover = '',
     this.summary = '',
@@ -67,6 +69,7 @@ class BookItem {
       ]),
       sourceId: firstNonEmptyString([json['sourceId']]),
       sourceName: firstNonEmptyString([json['sourceName']]),
+      sourceType: _sourceTypeFromJson(json),
       title: firstNonEmptyString([json['title']]),
       author: firstNonEmptyString([json['author']]),
       cover: firstNonEmptyString([json['cover']]),
@@ -105,13 +108,17 @@ class BookItem {
   BookItem withSource(BookSource source) {
     final resolvedId = sourceId.isEmpty ? source.id : sourceId;
     final resolvedName = sourceName.isEmpty ? source.name : sourceName;
-    if (resolvedId == sourceId && resolvedName == sourceName) {
+    final resolvedType = sourceType.isEmpty ? source.type : sourceType;
+    if (resolvedId == sourceId &&
+        resolvedName == sourceName &&
+        resolvedType == sourceType) {
       return this;
     }
     return BookItem(
       id: id,
       sourceId: resolvedId,
       sourceName: resolvedName,
+      sourceType: resolvedType,
       title: title,
       author: author,
       cover: cover,
@@ -120,6 +127,15 @@ class BookItem {
       format: format,
     );
   }
+}
+
+String _sourceTypeFromJson(Map<String, dynamic> json) {
+  final explicit = firstNonEmptyString([json['sourceType']]);
+  if (explicit.isNotEmpty) {
+    return explicit;
+  }
+  final type = firstNonEmptyString([json['type']]).toLowerCase();
+  return type == 'opds' || type == 'legado' ? type : '';
 }
 
 String firstNonEmptyString(

@@ -120,4 +120,116 @@ void main() {
       );
     });
   });
+
+  group('Gutenberg Chinese / OPDS file books', () {
+    const gutenbergCatalog = {
+      'id': 'urn:gutenberg:25329',
+      'bookId': '25329',
+      'title': '朝花夕拾',
+      'author': 'Lu, Xun',
+      'sourceId': 'gutenberg-zh',
+      'sourceName': '古腾堡中文',
+      'summary': 'Free eBooks since 1971.',
+      'detailHref': 'https://www.gutenberg.org/ebooks/25329.opds',
+      'bookUrl': 'https://www.gutenberg.org/ebooks/25329.opds',
+      'acquisitionLinks': [
+        {
+          'rel': 'http://opds-spec.org/acquisition',
+          'type': 'application/epub+zip',
+          'href': 'https://www.gutenberg.org/ebooks/25329.epub.images',
+        },
+      ],
+    };
+
+    test('catalog payload is a file book, not a Legado chapter locator', () {
+      final item = BookItem.fromJson(gutenbergCatalog);
+
+      expect(item.title, '朝花夕拾');
+      expect(item.author, 'Lu, Xun');
+      expect(item.sourceName, '古腾堡中文');
+      expect(item.format, 'epub');
+      expect(item.detailHref, 'https://www.gutenberg.org/ebooks/25329.opds');
+      expect(shouldFetchBookChapters(item), isFalse);
+      expect(
+        bookEmptyChaptersMessage(item),
+        '该书暂不支持章节阅读。EPUB 文件流会在后续版本接入。',
+      );
+    });
+
+    test('all-source recommend copies OPDS type so chapters are not requested', () {
+      final unlabeled = BookItem.fromJson(const {
+        'id': '25329',
+        'title': '朝花夕拾',
+        'author': 'Lu, Xun',
+        'summary': 'Free eBooks since 1971.',
+        'detailHref': 'https://www.gutenberg.org/ebooks/25329.opds',
+      });
+      const source = BookSource(
+        id: 'gutenberg-zh',
+        name: '古腾堡中文',
+        type: 'opds',
+        catalogSupported: true,
+      );
+
+      expect(unlabeled.sourceType, isEmpty);
+      expect(shouldFetchBookChapters(unlabeled), isTrue);
+
+      final labeled = BooksService.attachSource([unlabeled], source).single;
+      expect(labeled.sourceId, 'gutenberg-zh');
+      expect(labeled.sourceName, '古腾堡中文');
+      expect(labeled.sourceType, 'opds');
+      expect(shouldFetchBookChapters(labeled), isFalse);
+      expect(
+        bookEmptyChaptersMessage(labeled),
+        '该书暂不支持章节阅读。EPUB 文件流会在后续版本接入。',
+      );
+    });
+
+    test('Legado source-missing API error is not shown as a chapter failure', () {
+      final item = BookItem.fromJson(gutenbergCatalog);
+      expect(
+        bookChaptersErrorMessage(
+          Exception('未找到对应的 Legado 书源'),
+          item,
+        ),
+        '该书暂不支持章节阅读。EPUB 文件流会在后续版本接入。',
+      );
+    });
+
+    test('detail merge keeps OPDS type and EPUB acquisition format', () {
+      const local = BookItem(
+        id: '25329',
+        sourceId: 'gutenberg-zh',
+        sourceName: '古腾堡中文',
+        sourceType: 'opds',
+        title: '朝花夕拾',
+        author: 'Lu, Xun',
+        detailHref: 'https://www.gutenberg.org/ebooks/25329.opds',
+      );
+      final remote = BookItem.fromJson(gutenbergCatalog);
+
+      final merged = mergeBookDetail(remote, local);
+      expect(merged.sourceType, 'opds');
+      expect(merged.format, 'epub');
+      expect(shouldFetchBookChapters(merged), isFalse);
+    });
+
+    test('true Legado chapter books still request the chapters API', () {
+      const item = BookItem(
+        id: 'https://book.example/book/42',
+        sourceId: 'legado-a',
+        sourceName: '书源A',
+        sourceType: 'legado',
+        title: '三体',
+        detailHref: 'https://book.example/book/42',
+      );
+
+      expect(shouldFetchBookChapters(item), isTrue);
+      expect(bookChaptersQuery(item)['sourceId'], 'legado-a');
+      expect(
+        bookChaptersErrorMessage(Exception('未找到对应的 Legado 书源'), item),
+        isNot('未找到对应的 Legado 书源'),
+      );
+    });
+  });
 }
