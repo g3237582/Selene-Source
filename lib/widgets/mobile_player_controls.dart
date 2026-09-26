@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:volume_controller/volume_controller.dart';
+import '../playback/fullscreen_orientation.dart';
 import '../playback/player_progress.dart';
 import 'dlna_device_dialog.dart';
 import 'video_progress_bar.dart';
@@ -32,6 +33,8 @@ class MobilePlayerControls extends StatefulWidget {
   final Future<void> Function(double speed) onSetSpeed;
   final Future<void> Function() onEnterPipMode;
   final bool isPipMode;
+  final ValueNotifier<FullscreenOrientationMode> fullscreenOrientationListenable;
+  final Future<void> Function() onToggleFullscreenOrientation;
 
   const MobilePlayerControls({
     super.key,
@@ -56,6 +59,8 @@ class MobilePlayerControls extends StatefulWidget {
     required this.onSetSpeed,
     required this.onEnterPipMode,
     required this.isPipMode,
+    required this.fullscreenOrientationListenable,
+    required this.onToggleFullscreenOrientation,
   });
 
   @override
@@ -88,6 +93,8 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   @override
   void initState() {
     super.initState();
+    widget.fullscreenOrientationListenable
+        .addListener(_onFullscreenOrientationChanged);
     _initSystemControls();
     _listenPlayerStreams();
     _updateCurrentTime();
@@ -102,6 +109,13 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   @override
   void didUpdateWidget(covariant MobilePlayerControls oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.fullscreenOrientationListenable !=
+        widget.fullscreenOrientationListenable) {
+      oldWidget.fullscreenOrientationListenable
+          .removeListener(_onFullscreenOrientationChanged);
+      widget.fullscreenOrientationListenable
+          .addListener(_onFullscreenOrientationChanged);
+    }
     // 当 PIP 模式停止时，显示控制栏
     if (oldWidget.isPipMode && !widget.isPipMode) {
       setState(() => _controlsVisible = true);
@@ -167,8 +181,14 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
     }));
   }
 
+  void _onFullscreenOrientationChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    widget.fullscreenOrientationListenable
+        .removeListener(_onFullscreenOrientationChanged);
     for (final subscription in _subscriptions) {
       subscription.cancel();
     }
@@ -181,6 +201,21 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   }
 
   bool get _isFullscreen => widget.state.isFullscreen();
+  bool get _isPortraitFullscreen =>
+      widget.fullscreenOrientationListenable.value ==
+      FullscreenOrientationMode.portrait;
+
+  /// Immersive fullscreen clears [MediaQueryData.padding]; keep controls off
+  /// the cutout and home indicator via [MediaQueryData.viewPadding].
+  EdgeInsets get _fullscreenSafeInset {
+    if (!_isFullscreen) return EdgeInsets.zero;
+    final media = MediaQuery.of(context);
+    return fullscreenControlSafeInset(
+      padding: media.padding,
+      viewPadding: media.viewPadding,
+    );
+  }
+
   bool get _isPlaying => widget.player.state.playing;
   Duration get _position => widget.player.state.position;
   Duration get _duration => widget.player.state.duration;
@@ -251,7 +286,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
 
   void _onSwipeStart(DragStartDetails details) {
     if (_isLocked || widget.live) return;
-    _screenSize ??= MediaQuery.of(context).size;
+    _screenSize = MediaQuery.of(context).size;
     setState(() {
       _isSeekingViaSwipe = true;
       _swipeStartX = details.globalPosition.dx;
@@ -656,7 +691,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
 
   Widget _buildCurrentTime() {
     return Positioned(
-      top: 8,
+      top: 8 + _fullscreenSafeInset.top,
       left: 0,
       right: 0,
       child: AnimatedOpacity(
@@ -706,9 +741,10 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   }
 
   Widget _buildBackButton() {
+    final safe = _fullscreenSafeInset;
     return Positioned(
-      top: _isFullscreen ? 8 : 4,
-      left: _isFullscreen ? 16.0 : 8.0,
+      top: (_isFullscreen ? 8 : 4) + safe.top,
+      left: (_isFullscreen ? 16.0 : 8.0) + safe.left,
       child: AnimatedOpacity(
         opacity: (_controlsVisible && !_isLocked) ? 1.0 : 0.0,
         duration: const Duration(milliseconds: 200),
@@ -739,9 +775,10 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   }
 
   Widget _buildCastButton() {
+    final safe = _fullscreenSafeInset;
     return Positioned(
-      top: _isFullscreen ? 8 : 4,
-      right: _isFullscreen ? 16.0 : 8.0,
+      top: (_isFullscreen ? 8 : 4) + safe.top,
+      right: (_isFullscreen ? 16.0 : 8.0) + safe.right,
       child: AnimatedOpacity(
         opacity: (_controlsVisible && !_isLocked) ? 1.0 : 0.0,
         duration: const Duration(milliseconds: 200),
@@ -794,10 +831,11 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   }
 
   Widget _buildProgressBar() {
+    final safe = _fullscreenSafeInset;
     return Positioned(
-      bottom: _isFullscreen ? 58.0 : 42.0,
-      left: 0,
-      right: 0,
+      bottom: (_isFullscreen ? 58.0 : 42.0) + safe.bottom,
+      left: safe.left,
+      right: safe.right,
       child: AnimatedOpacity(
         opacity: (_controlsVisible && !_isLocked) ? 1.0 : 0.0,
         duration: const Duration(milliseconds: 200),
@@ -845,8 +883,11 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   Widget _buildBottomControls() {
     final position = _dragPosition ?? _position;
     final duration = _duration;
+    final safe = _fullscreenSafeInset;
+    final compact =
+        _isFullscreen && MediaQuery.sizeOf(context).width < 500;
     return Positioned(
-      bottom: _isFullscreen ? 4.0 : -6.0,
+      bottom: (_isFullscreen ? 4.0 : -6.0) + safe.bottom,
       left: 0,
       right: 0,
       child: AnimatedOpacity(
@@ -856,8 +897,8 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
           ignoring: !_controlsVisible || _isLocked,
           child: Padding(
             padding: EdgeInsets.only(
-              left: _isFullscreen ? 16.0 : 8.0,
-              right: _isFullscreen ? 16.0 : 8.0,
+              left: (_isFullscreen ? 16.0 : 8.0) + safe.left,
+              right: (_isFullscreen ? 16.0 : 8.0) + safe.right,
               bottom: _isFullscreen ? 8.0 : 8.0,
             ),
             child: Row(
@@ -896,6 +937,8 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
                       padding: const EdgeInsets.only(left: 8.0, right: 8.0),
                       child: Text(
                         '${_formatDuration(position)} / ${_formatDuration(duration)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style:
                             const TextStyle(color: Colors.white, fontSize: 12),
                       ),
@@ -910,7 +953,9 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
                     },
                     behavior: HitTestBehavior.opaque,
                     child: Container(
-                      padding: EdgeInsets.only(right: _isFullscreen ? 22 : 10),
+                      padding: EdgeInsets.only(
+                        right: compact ? 8 : (_isFullscreen ? 22 : 10),
+                      ),
                       child: Icon(
                         Icons.speed,
                         color: Colors.white,
@@ -927,7 +972,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
                     },
                     behavior: HitTestBehavior.opaque,
                     child: Container(
-                      padding: const EdgeInsets.all(8),
+                      padding: EdgeInsets.all(compact ? 4 : 8),
                       child: Icon(
                         Icons.picture_in_picture_alt,
                         color: Colors.white,
@@ -935,6 +980,8 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
                       ),
                     ),
                   ),
+                if (_isFullscreen && fullscreenOrientationLockSupported())
+                  _buildOrientationToggle(compact: compact),
                 GestureDetector(
                   onTap: () {
                     _onUserInteraction();
@@ -946,7 +993,10 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
                   },
                   behavior: HitTestBehavior.opaque,
                   child: Container(
-                    padding: EdgeInsets.only(left: _isFullscreen ? 12 : 5, right: _isFullscreen ? 12 : 8),
+                    padding: EdgeInsets.only(
+                      left: compact ? 4 : (_isFullscreen ? 12 : 5),
+                      right: compact ? 4 : (_isFullscreen ? 12 : 8),
+                    ),
                     child: Icon(
                       _isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
                       color: Colors.white,
@@ -962,12 +1012,42 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
     );
   }
 
+  Widget _buildOrientationToggle({required bool compact}) {
+    final portrait = _isPortraitFullscreen;
+    return Tooltip(
+      message: portrait ? '横屏播放' : '竖屏播放',
+      child: GestureDetector(
+        key: const Key('player-fullscreen-orientation-toggle'),
+        onTap: () {
+          _onUserInteraction();
+          widget.onToggleFullscreenOrientation();
+        },
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? 4 : 8,
+            vertical: 8,
+          ),
+          child: Icon(
+            portrait
+                ? Icons.stay_current_landscape
+                : Icons.stay_current_portrait,
+            color: Colors.white,
+            size: 26,
+            semanticLabel: portrait ? '切换横屏全屏' : '切换竖屏全屏',
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildLongPressIndicator() {
-    return const Positioned(
-      top: 10,
+    final safe = _fullscreenSafeInset;
+    return Positioned(
+      top: 10 + safe.top,
       left: 0,
       right: 0,
-      child: Row(
+      child: const Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text('2x',
@@ -984,7 +1064,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
 
   Widget _buildBrightnessIndicator() {
     return Positioned(
-      left: 16.0,
+      left: 16.0 + _fullscreenSafeInset.left,
       top: 0,
       bottom: 0,
       child: Center(
@@ -1049,7 +1129,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
   Widget _buildRightOverlay() {
     if (_showVolumeIndicator && !_isLocked) {
       return Positioned(
-        right: 16.0,
+        right: 16.0 + _fullscreenSafeInset.right,
         top: 0,
         bottom: 0,
         child: Center(
@@ -1114,7 +1194,7 @@ class _MobilePlayerControlsState extends State<MobilePlayerControls> {
     }
 
     return Positioned(
-      right: 16.0,
+      right: 16.0 + _fullscreenSafeInset.right,
       top: 0,
       bottom: 0,
       child: Center(

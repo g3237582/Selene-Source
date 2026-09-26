@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:pip/pip.dart';
+import '../playback/fullscreen_orientation.dart';
 import '../playback/player_stream_cache.dart';
 import 'mobile_player_controls.dart';
 import 'pc_player_controls.dart';
@@ -136,7 +137,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
   StreamSubscription<bool>? _playingSubscription;
   StreamSubscription<bool>? _completedSubscription;
   StreamSubscription<Duration>? _durationSubscription;
+  StreamSubscription<int?>? _widthSubscription;
   final ValueNotifier<double> _playbackSpeed = ValueNotifier<double>(1.0);
+  final FullscreenOrientationSession _fullscreenOrientation =
+      FullscreenOrientationSession();
+  bool _fullscreenChromeActive = false;
+  bool _applyingFullscreenChrome = false;
   bool _playerDisposed = false;
   VoidCallback? _exitWebFullscreenCallback;
   final Pip _pip = Pip();
@@ -275,6 +281,12 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
         }
       });
     }
+
+    _widthSubscription?.cancel();
+    _widthSubscription = _player!.stream.width.listen((_) {
+      if (!mounted) return;
+      _syncAutoFullscreenOrientation();
+    });
 
     _durationSubscription = _player!.stream.duration.listen((duration) {
       if (!mounted) return;
@@ -441,6 +453,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     _playingSubscription?.cancel();
     _completedSubscription?.cancel();
     _durationSubscription?.cancel();
+    _widthSubscription?.cancel();
     _progressListeners.clear();
     await _player?.dispose();
     _player = null;
@@ -465,8 +478,55 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
     }
   }
 
+  Future<void> _handleEnterFullscreen() async {
+    _fullscreenOrientation.onEnter(
+      videoWidth: _player?.state.width,
+      videoHeight: _player?.state.height,
+    );
+    _fullscreenChromeActive = true;
+    _applyingFullscreenChrome = true;
+    try {
+      await FullscreenChrome.enter(_fullscreenOrientation.value);
+    } finally {
+      _applyingFullscreenChrome = false;
+    }
+    // A toggle or a late frame size can change the mode while the first
+    // orientation request is still in flight. Apply the session value again
+    // so that request cannot win.
+    await FullscreenChrome.apply(_fullscreenOrientation.value);
+    _syncAutoFullscreenOrientation();
+  }
+
+  Future<void> _handleExitFullscreen() async {
+    _fullscreenChromeActive = false;
+    _applyingFullscreenChrome = false;
+    _fullscreenOrientation.onExit();
+    await FullscreenChrome.exit();
+  }
+
+  Future<void> _toggleFullscreenOrientation() async {
+    if (!_fullscreenChromeActive) return;
+    final next = _fullscreenOrientation.toggle();
+    await FullscreenChrome.apply(next);
+  }
+
+  void _syncAutoFullscreenOrientation() {
+    if (!_fullscreenChromeActive || _applyingFullscreenChrome) return;
+    final changed = _fullscreenOrientation.adoptFrame(
+      videoWidth: _player?.state.width,
+      videoHeight: _player?.state.height,
+    );
+    if (!changed) return;
+    unawaited(FullscreenChrome.apply(_fullscreenOrientation.value));
+  }
+
   @override
   void dispose() {
+    if (_fullscreenChromeActive) {
+      _fullscreenChromeActive = false;
+      unawaited(FullscreenChrome.exit());
+    }
+    _fullscreenOrientation.dispose();
     WidgetsBinding.instance.removeObserver(this);
     if (Platform.isAndroid || Platform.isIOS) {
       _pip.unregisterStateChangedObserver();
@@ -484,6 +544,11 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       child: _isInitialized && _videoController != null
           ? Video(
               controller: _videoController!,
+              // Contain in both orientations: vertical frames fill a portrait
+              // screen, horizontal frames stay letterboxed.
+              fit: BoxFit.contain,
+              onEnterFullscreen: _handleEnterFullscreen,
+              onExitFullscreen: _handleExitFullscreen,
               controls: (state) {
                 return widget.surface == VideoPlayerSurface.desktop
                     ? PCPlayerControls(
@@ -531,6 +596,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
                         onSetSpeed: _setPlaybackSpeed,
                         onEnterPipMode: _enterPipMode,
                         isPipMode: _isPipMode,
+                        fullscreenOrientationListenable: _fullscreenOrientation,
+                        onToggleFullscreenOrientation:
+                            _toggleFullscreenOrientation,
                       );
               },
             )
