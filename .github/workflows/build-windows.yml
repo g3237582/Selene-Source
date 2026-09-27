@@ -1,0 +1,77 @@
+name: Build Windows portable
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/windows-x64-portable-3cdb
+      - main
+    tags:
+      - 'v*'
+
+concurrency:
+  group: windows-portable-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Match release-android.yml. Do not follow the older upstream build
+      # repo pin; this fork's Android releases already use 3.47.4.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.4'
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Flutter doctor
+        run: flutter doctor -v
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Windows release
+        run: flutter build windows --release
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $match = Select-String -Path pubspec.yaml -Pattern '^version:\s*(\S+)' | Select-Object -First 1
+          if (-not $match) {
+            throw "Could not read version from pubspec.yaml"
+          }
+          $version = ($match.Matches.Groups[1].Value -split '\+')[0]
+          Write-Host "Packaging version $version"
+          $releasePath = "build/windows/x64/runner/Release"
+          if (-not (Test-Path $releasePath)) {
+            throw "Windows release directory not found: $releasePath"
+          }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $zipPath = "dist/selene-$version-windows-x64-portable.zip"
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath -Force
+          }
+          Compress-Archive -Path "$releasePath/*" -DestinationPath $zipPath -Force
+          Get-ChildItem $releasePath | Select-Object Name, Length | Format-Table -AutoSize
+          Get-Item $zipPath | Format-List FullName, Length
+
+      - name: Upload portable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: selene-windows-x64-portable
+          path: dist/selene-*-windows-x64-portable.zip
+          if-no-files-found: error
+          compression-level: 0
