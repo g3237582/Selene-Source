@@ -15,9 +15,14 @@ import 'package:macos_window_utils/macos_window_utils.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:bitsdojo_window/bitsdojo_window.dart';
 import 'music/music_media_session.dart';
+import 'net/windows_system_proxy.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Dart HttpClient ignores WinINet. Install before any request so login,
+  // API, images, and SSE use the Windows system proxy when one is enabled.
+  await WindowsSystemProxy.install();
 
   // 初始化 media_kit (用于 PC 端播放器)
   MediaKit.ensureInitialized();

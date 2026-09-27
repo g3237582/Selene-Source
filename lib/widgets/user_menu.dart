@@ -1,9 +1,9 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/user_data_service.dart';
+import '../utils/auth_cookie.dart';
 import '../screens/login_screen.dart';
 import '../services/douban_cache_service.dart';
 import '../services/page_cache_service.dart';
@@ -85,49 +85,7 @@ class _UserMenuState extends State<UserMenu> {
   }
 
   String _parseRoleFromCookies(String? cookies) {
-    if (cookies == null || cookies.isEmpty) {
-      return 'user';
-    }
-
-    try {
-      // 解析cookies字符串
-      final cookieMap = <String, String>{};
-      final cookiePairs = cookies.split(';');
-
-      for (final cookie in cookiePairs) {
-        final trimmed = cookie.trim();
-        final firstEqualIndex = trimmed.indexOf('=');
-
-        if (firstEqualIndex > 0) {
-          final key = trimmed.substring(0, firstEqualIndex);
-          final value = trimmed.substring(firstEqualIndex + 1);
-          if (key.isNotEmpty && value.isNotEmpty) {
-            cookieMap[key] = value;
-          }
-        }
-      }
-
-      final authCookie = cookieMap['auth'];
-      if (authCookie == null) {
-        return 'user';
-      }
-
-      // 处理可能的双重编码
-      String decoded = Uri.decodeComponent(authCookie);
-
-      // 如果解码后仍然包含 %，说明是双重编码，需要再次解码
-      if (decoded.contains('%')) {
-        decoded = Uri.decodeComponent(decoded);
-      }
-
-      final authData = json.decode(decoded);
-      final role = authData['role'] as String?;
-
-      return role ?? 'user';
-    } catch (e) {
-      // 解析失败时默认为user
-      return 'user';
-    }
+    return parseRoleFromCookieHeader(cookies);
   }
 
   Future<void> _handleLogout() async {
