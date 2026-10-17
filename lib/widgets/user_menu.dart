@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../search/special_search_history_store.dart';
 import '../services/user_data_service.dart';
 import '../screens/login_screen.dart';
 import '../services/douban_cache_service.dart';
@@ -131,10 +132,11 @@ class _UserMenuState extends State<UserMenu> {
   }
 
   Future<void> _handleLogout() async {
-    // 清空所有缓存
+    // 清空所有缓存。特殊源历史不在普通搜索历史里，退出时一并清掉。
     LiveService.clearAllCache();
     LocalSearchCacheService().clearCache();
     PageCacheService().clearAllCache();
+    await SpecialSearchHistoryStore.clear();
 
     // 只清除密码和cookies，保留服务器地址和用户名
     await UserDataService.clearPasswordAndCookies();

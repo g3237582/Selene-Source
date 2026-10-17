@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io' show Platform;
 import 'dart:async';
+import '../search/video_search_request.dart';
 import '../services/user_data_service.dart';
 import '../services/local_mode_storage_service.dart';
 import '../services/subscription_service.dart';
@@ -333,13 +334,22 @@ class _LoginScreenState extends State<LoginScreen> {
           case 200:
             // 解析并保存 cookies
             String cookies = _parseCookies(response);
+            String? authToken;
+            try {
+              authToken = VideoSearchRequest.readLoginToken(
+                json.decode(response.body),
+              );
+            } catch (_) {
+              authToken = null;
+            }
 
-            // 保存用户数据
+            // 保存用户数据。token 按登录响应原样保存，不解码。
             await UserDataService.saveUserData(
               serverUrl: baseUrl,
               username: _usernameController.text,
               password: _passwordController.text,
               cookies: cookies,
+              authToken: authToken ?? '',
             );
             if (!mounted) return;
 

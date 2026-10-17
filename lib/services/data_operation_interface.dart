@@ -79,17 +79,36 @@ abstract class FavoriteOperationInterface {
 /// 搜索记录操作接口
 abstract class SearchRecordOperationInterface {
   /// 获取搜索历史（优先从缓存，缓存未命中则从API获取）
-  Future<DataOperationResult<List<String>>> getSearchHistory(BuildContext context);
+  ///
+  /// [special] 为 true 时只读本地特殊源历史，不读普通历史。
+  Future<DataOperationResult<List<String>>> getSearchHistory(
+    BuildContext context, {
+    bool special = false,
+  });
   
   /// 添加搜索历史
-  Future<DataOperationResult<void>> addSearchHistory(String query, BuildContext context);
+  Future<DataOperationResult<void>> addSearchHistory(
+    String query,
+    BuildContext context, {
+    bool special = false,
+  });
   
   /// 删除搜索历史
-  Future<DataOperationResult<void>> deleteSearchHistory(String query, BuildContext context);
+  Future<DataOperationResult<void>> deleteSearchHistory(
+    String query,
+    BuildContext context, {
+    bool special = false,
+  });
   
   /// 清空搜索历史
-  Future<DataOperationResult<void>> clearSearchHistory(BuildContext context);
+  Future<DataOperationResult<void>> clearSearchHistory(
+    BuildContext context, {
+    bool special = false,
+  });
 
   /// 刷新搜索历史（强制从API获取最新数据）
-  Future<void> refreshSearchHistory(BuildContext context);
+  Future<void> refreshSearchHistory(
+    BuildContext context, {
+    bool special = false,
+  });
 }
