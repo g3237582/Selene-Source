@@ -201,6 +201,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
       _isLoadingVideo = true;
     });
     try {
+      await PlayerStreamCache.applyPlaybackProxy(_player!, _currentUrl!);
       await _player!.open(
         Media(
           _currentUrl!,
@@ -325,6 +326,7 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget>
 
     try {
       final currentSpeed = _player!.state.rate;
+      await PlayerStreamCache.applyPlaybackProxy(_player!, url);
       await _player!.open(
         Media(
           url,

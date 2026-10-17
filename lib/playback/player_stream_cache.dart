@@ -1,5 +1,9 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
+
+import '../net/windows_system_proxy.dart';
 
 /// Stream-cache settings for media_kit. VOD keeps a forward buffer so the
 /// progress bar can show cached range; live keeps a small buffer to bound RAM.
@@ -40,6 +44,20 @@ class PlayerStreamCache {
       );
     } catch (error) {
       debugPrint('PlayerStreamCache: native cache config skipped $error');
+    }
+  }
+
+  /// libmpv does not use Dart's HttpClient, so copy the same Windows proxy
+  /// decision onto mpv `http-proxy`. An empty value keeps a direct connection.
+  static Future<void> applyPlaybackProxy(Player player, String url) async {
+    if (kIsWeb || !Platform.isWindows) return;
+    final uri = Uri.tryParse(url);
+    final proxy = uri == null ? '' : WindowsSystemProxy.mpvHttpProxyFor(uri);
+    try {
+      final platform = player.platform as dynamic;
+      await platform.setProperty('http-proxy', proxy);
+    } catch (error) {
+      debugPrint('PlayerStreamCache: http-proxy skipped $error');
     }
   }
 }
