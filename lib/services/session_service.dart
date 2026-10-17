@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../search/video_search_request.dart';
 import 'session_policy.dart';
 import 'user_data_service.dart';
 
@@ -70,11 +71,20 @@ class SessionService {
 
       if (response.statusCode == 200) {
         final cookies = parseSetCookieHeader(response.headers['set-cookie']);
+        String? authToken;
+        try {
+          authToken = VideoSearchRequest.readLoginToken(
+            json.decode(response.body),
+          );
+        } catch (_) {
+          authToken = null;
+        }
         await UserDataService.saveUserData(
           serverUrl: baseUrl,
           username: username,
           password: password,
           cookies: cookies,
+          authToken: authToken ?? '',
         );
         return SessionRefreshOutcome.success;
       }

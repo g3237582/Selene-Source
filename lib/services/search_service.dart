@@ -4,6 +4,7 @@ import '../models/search_result.dart';
 import '../models/search_resource.dart';
 import 'api_service.dart';
 import 'downstream_service.dart';
+import '../search/search_history_plan.dart';
 import '../services/user_data_service.dart';
 import '../services/local_mode_storage_service.dart';
 
@@ -49,8 +50,13 @@ class SearchService {
 
     _isRefreshing = true;
     try {
-      final resources = await ApiService.getSearchResources();
-      _cachedResources = resources;
+      // Normal resources only. Special sources must not enter this cache:
+      // homepage suggestions and aggregated recommendations read it.
+      const special = false;
+      final resources = await ApiService.getSearchResources(special: special);
+      if (RecommendationSourcePolicy.cacheForRecommendations(special: special)) {
+        _cachedResources = resources;
+      }
       return resources;
     } catch (e) {
       return _cachedResources ?? [];

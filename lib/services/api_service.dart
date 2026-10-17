@@ -13,6 +13,9 @@ import '../models/live_source.dart';
 import '../models/live_channel.dart';
 import '../models/epg_program.dart';
 import '../models/search_suggestion.dart';
+import '../search/search_history_plan.dart';
+import '../search/special_source_access.dart';
+import '../search/video_search_request.dart';
 
 /// API响应结果类
 class ApiResponse<T> {
@@ -513,14 +516,18 @@ class ApiService {
     }
   }
 
-  /// 添加搜索历史
+  /// 添加搜索历史。
+  ///
+  /// 特殊源搜索必须带 `special: true`，服务端会跳过写入，避免进入普通历史和推荐。
   static Future<ApiResponse<void>> addSearchHistory(
-      String query, BuildContext context) async {
+      String query, BuildContext context, {bool special = false}) async {
     try {
+      final plan = SearchHistoryPlan.forMode(keyword: query, special: special);
       final response = await post<void>(
-        '/api/searchhistory',
+        VideoSearchRequest.historyPath,
         context: context,
-        body: {'keyword': query},
+        body: plan.body,
+        headers: await _bearerHeaders(),
       );
 
       return response;
@@ -710,16 +717,42 @@ class ApiService {
     }
   }
 
+  static Future<Map<String, String>> _bearerHeaders() async {
+    final token = VideoSearchRequest.bearerToken(
+      storedToken: await UserDataService.getAuthToken(),
+      cookie: await _getCookies(),
+    );
+    if (token == null || token.isEmpty) {
+      return const {};
+    }
+    return {'Authorization': 'Bearer $token'};
+  }
+
+  static void _throwIfSpecialForbidden(ApiResponse<dynamic> response) {
+    if (SpecialSourceAccess.isForbiddenBody(
+      response.statusCode,
+      response.errorData,
+    )) {
+      throw const SpecialSourceForbiddenException();
+    }
+  }
+
   /// 搜索视频源数据
-  static Future<List<SearchResult>> fetchSourcesData(String query) async {
+  static Future<List<SearchResult>> fetchSourcesData(
+    String query, {
+    bool special = false,
+  }) async {
     try {
       final response = await get<Map<String, dynamic>>(
-        '/api/search',
-        queryParameters: {
-          'q': query.trim(),
-        },
+        VideoSearchRequest.searchPath,
+        queryParameters: VideoSearchRequest.queryParameters(
+          query: query.trim(),
+          special: special,
+        ),
+        headers: await _bearerHeaders(),
         fromJson: (data) => data as Map<String, dynamic>,
       );
+      _throwIfSpecialForbidden(response);
 
       if (response.success && response.data != null) {
         final data = response.data!;
@@ -733,17 +766,26 @@ class ApiService {
         print('搜索失败: ${response.message}');
         return [];
       }
+    } on SpecialSourceForbiddenException {
+      rethrow;
     } catch (e) {
       print('搜索失败: $e');
       return [];
     }
   }
 
-  /// 获取搜索资源列表
-  static Future<List<SearchResource>> getSearchResources() async {
+  /// 获取搜索资源列表。
+  ///
+  /// [special] 为 true 时只返回特殊采集源。调用方不得把这份列表写入推荐缓存。
+  static Future<List<SearchResource>> getSearchResources({
+    bool special = false,
+  }) async {
     try {
+      final params = VideoSearchRequest.queryParameters(special: special);
       final response = await get<List<SearchResource>>(
-        '/api/search/resources',
+        VideoSearchRequest.resourcesPath,
+        queryParameters: params.isEmpty ? null : params,
+        headers: await _bearerHeaders(),
         fromJson: (data) {
           final list = data as List<dynamic>;
           return list
@@ -753,12 +795,15 @@ class ApiService {
         },
       );
 
+      _throwIfSpecialForbidden(response);
       if (response.success && response.data != null) {
         return response.data!;
       } else {
         print('获取搜索源失败: ${response.message}');
         return [];
       }
+    } on SpecialSourceForbiddenException {
+      rethrow;
     } catch (e) {
       print('获取搜索源失败: $e');
       return [];
@@ -847,11 +892,18 @@ class ApiService {
   }
 
   /// 获取搜索建议
-  static Future<List<String>> getSearchSuggestions(String query) async {
+  static Future<List<String>> getSearchSuggestions(
+    String query, {
+    bool special = false,
+  }) async {
     try {
       final response = await get<List<SearchSuggestion>>(
-        '/api/search/suggestions',
-        queryParameters: {'q': query.trim()},
+        VideoSearchRequest.suggestionsPath,
+        queryParameters: VideoSearchRequest.queryParameters(
+          query: query.trim(),
+          special: special,
+        ),
+        headers: await _bearerHeaders(),
         fromJson: (data) {
           final responseData = data as Map<String, dynamic>;
           final list = responseData['suggestions'] as List<dynamic>;
@@ -862,6 +914,7 @@ class ApiService {
         },
       );
 
+      _throwIfSpecialForbidden(response);
       if (response.success && response.data != null) {
         // 提取建议文本列表
         return response.data!.map((suggestion) => suggestion.text).toList();
@@ -869,6 +922,8 @@ class ApiService {
         print('获取搜索建议失败: ${response.message}');
         return [];
       }
+    } on SpecialSourceForbiddenException {
+      rethrow;
     } catch (e) {
       print('获取搜索建议失败: $e');
       return [];

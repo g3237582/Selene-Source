@@ -3,9 +3,15 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
+import '../search/special_source_access.dart';
+import '../search/special_source_client.dart';
+import '../search/video_search_session.dart';
+import '../search/video_source_mode.dart';
 import '../services/page_cache_service.dart';
 import '../services/theme_service.dart';
 import '../services/sse_search_service.dart';
+import '../services/user_data_service.dart';
+import '../widgets/video_source_mode_switch.dart';
 import '../models/search_result.dart';
 import '../models/video_info.dart';
 import '../search/search_list_paging.dart';
@@ -79,6 +85,10 @@ class _SearchScreenState extends State<SearchScreen>
   bool _isClearHistoryButtonHovered = false;
 
   late SSESearchService _searchService;
+  final VideoSearchModeState _sourceMode = VideoSearchModeState();
+  VideoSearchSession? _lastSearchSession;
+  bool _loadingCapability = false;
+  bool _capabilityDirty = false;
   StreamSubscription<List<SearchResult>>? _incrementalResultsSubscription;
   StreamSubscription<SearchProgress>? _progressSubscription;
   StreamSubscription<String>? _errorSubscription;
@@ -197,6 +207,8 @@ class _SearchScreenState extends State<SearchScreen>
     _searchService = SSESearchService();
     _setupSearchListeners();
     _loadSearchHistory();
+    UserDataService.addSessionListener(_onSearchSessionChanged);
+    _refreshSpecialCapability();
 
     // 初始化删除动画控制器
     _deleteAnimationController = AnimationController(
@@ -229,6 +241,7 @@ class _SearchScreenState extends State<SearchScreen>
     _errorSubscription?.cancel();
     _updateTimer?.cancel();
     _posterHashTimer?.cancel();
+    UserDataService.removeSessionListener(_onSearchSessionChanged);
     _searchService.dispose();
     _searchProgressListenable.dispose();
     _searchBusy.dispose();
@@ -310,6 +323,11 @@ class _SearchScreenState extends State<SearchScreen>
           return;
         }
 
+        if (error == SpecialSourceForbiddenException.message) {
+          _onSpecialSourceForbidden();
+          return;
+        }
+
         setState(() {
           _searchError = error;
         });
@@ -317,10 +335,95 @@ class _SearchScreenState extends State<SearchScreen>
     });
   }
 
+  void _onSearchSessionChanged() {
+    _capabilityDirty = true;
+    _refreshSpecialCapability();
+  }
+
+  /// Re-check special-source capability after open, login, or server change.
+  Future<void> _refreshSpecialCapability() async {
+    if (_loadingCapability) {
+      _capabilityDirty = true;
+      return;
+    }
+    _loadingCapability = true;
+    _capabilityDirty = false;
+    final wasSpecial = _sourceMode.special;
+    try {
+      final session = await VideoSearchSession.current();
+      if (!mounted) {
+        return;
+      }
+      final changed = _lastSearchSession != null &&
+          session.differsFrom(_lastSearchSession!);
+      _lastSearchSession = session;
+      if (changed) {
+        setState(_sourceMode.onSessionChanged);
+      }
+      final capability = await const SpecialSourceGateway().load();
+      if (!mounted) {
+        return;
+      }
+      setState(() => _sourceMode.applyCapability(capability));
+      if (changed || (wasSpecial && !_sourceMode.special)) {
+        await _loadSearchHistory();
+        if (!mounted) {
+          return;
+        }
+        if (_hasSearched && _searchQuery.trim().isNotEmpty) {
+          _performSearch(_searchQuery);
+        }
+      }
+    } finally {
+      _loadingCapability = false;
+      if (_capabilityDirty && mounted) {
+        _capabilityDirty = false;
+        _refreshSpecialCapability();
+      }
+    }
+  }
+
+  Future<void> _onSourceModeChanged(bool special) async {
+    if (special == _sourceMode.special) {
+      return;
+    }
+    setState(() => _sourceMode.special = special);
+    await _loadSearchHistory();
+    if (!mounted) {
+      return;
+    }
+    if (_hasSearched && _searchQuery.trim().isNotEmpty) {
+      _performSearch(_searchQuery);
+    }
+  }
+
+  void _onSpecialSourceForbidden() {
+    if (!mounted) {
+      return;
+    }
+    if (!_sourceMode.special && !_sourceMode.toggleVisible) {
+      return;
+    }
+    final shouldRerun =
+        _sourceMode.special && _searchQuery.trim().isNotEmpty;
+    setState(_sourceMode.onSpecialForbidden);
+    _loadSearchHistory();
+    final message = _sourceMode.notice ?? SpecialSourceForbiddenException.message;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+    if (shouldRerun) {
+      _performSearch(_searchQuery);
+    }
+  }
+
   Future<void> _loadSearchHistory() async {
     // 首先尝试从缓存加载数据
     try {
-      final result = await PageCacheService().getSearchHistory(context);
+      final result = await PageCacheService().getSearchHistory(
+        context,
+        special: _sourceMode.special,
+      );
       if (mounted) {
         setState(() {
           _searchHistory = result.success ? (result.data ?? []) : [];
@@ -339,10 +442,19 @@ class _SearchScreenState extends State<SearchScreen>
   Future<void> _refreshSearchHistory() async {
     try {
       // 刷新缓存数据
-      await PageCacheService().refreshSearchHistory(context);
+      await PageCacheService().refreshSearchHistory(
+        context,
+        special: _sourceMode.special,
+      );
+      if (!mounted) {
+        return;
+      }
 
       // 重新获取搜索历史数据
-      final result = await PageCacheService().getSearchHistory(context);
+      final result = await PageCacheService().getSearchHistory(
+        context,
+        special: _sourceMode.special,
+      );
       if (mounted) {
         setState(() {
           _searchHistory = result.success ? (result.data ?? []) : [];
@@ -370,7 +482,11 @@ class _SearchScreenState extends State<SearchScreen>
     final trimmedQuery = query.trim();
 
     // 立即添加到缓存
-    PageCacheService().addSearchHistory(trimmedQuery, context);
+    PageCacheService().addSearchHistory(
+      trimmedQuery,
+      context,
+      special: _sourceMode.special,
+    );
 
     // 立即更新本地状态和UI
     if (mounted) {
@@ -513,7 +629,10 @@ class _SearchScreenState extends State<SearchScreen>
   /// 清空搜索历史
   Future<void> _clearSearchHistory() async {
     try {
-      final result = await PageCacheService().clearSearchHistory(context);
+      final result = await PageCacheService().clearSearchHistory(
+        context,
+        special: _sourceMode.special,
+      );
 
       if (result.success) {
         // 立即清空本地状态
@@ -555,8 +674,11 @@ class _SearchScreenState extends State<SearchScreen>
   /// 删除单个搜索历史
   Future<void> _deleteSearchHistory(String historyItem) async {
     try {
-      final result =
-          await PageCacheService().deleteSearchHistory(historyItem, context);
+      final result = await PageCacheService().deleteSearchHistory(
+        historyItem,
+        context,
+        special: _sourceMode.special,
+      );
 
       if (result.success) {
         // 立即从UI中移除
@@ -607,10 +729,17 @@ class _SearchScreenState extends State<SearchScreen>
 
     try {
       // 开始 SSE 搜索
-      await _searchService.startSearch(_searchQuery);
+      await _searchService.startSearch(
+        _searchQuery,
+        special: _sourceMode.special,
+      );
 
       // 重新设置监听器，确保流控制器已初始化
       _setupSearchListeners();
+    } on SpecialSourceForbiddenException {
+      _searchBusy.value = false;
+      _onSpecialSourceForbidden();
+      return;
     } catch (e) {
       if (mounted) {
         // 检查是否是连接关闭错误，如果是则忽略
@@ -642,6 +771,15 @@ class _SearchScreenState extends State<SearchScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (_sourceMode.toggleVisible)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                    child: VideoSourceModeSwitch(
+                      special: _sourceMode.special,
+                      dark: themeService.isDarkMode,
+                      onChanged: _onSourceModeChanged,
+                    ),
+                  ),
                 if (!_hasSearched) ...[
                   // 搜索错误提示
                   if (_searchError != null)
@@ -677,6 +815,8 @@ class _SearchScreenState extends State<SearchScreen>
           searchController: _searchController,
           searchFocusNode: _searchFocusNode,
           searchQuery: _searchQuery,
+          specialVideoSource: _sourceMode.special,
+          onSpecialSourceForbidden: _onSpecialSourceForbidden,
           onSearchQueryChanged: (value) {
             setState(() {
               _searchQuery = value;

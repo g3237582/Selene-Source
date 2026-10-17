@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
+import 'package:selene/search/special_source_access.dart';
 import 'package:selene/services/search_service.dart';
 import 'package:selene/services/user_data_service.dart';
 import '../models/feature_flags.dart';
@@ -31,6 +32,8 @@ class MainLayout extends StatefulWidget {
   final VoidCallback? onClearSearch;
   final bool showBottomNav;
   final List<BottomNavItem>? bottomNavItems;
+  final bool specialVideoSource;
+  final VoidCallback? onSpecialSourceForbidden;
 
   const MainLayout({
     super.key,
@@ -50,6 +53,8 @@ class MainLayout extends StatefulWidget {
     this.onClearSearch,
     this.showBottomNav = true,
     this.bottomNavItems,
+    this.specialVideoSource = false,
+    this.onSpecialSourceForbidden,
   });
 
   @override
@@ -88,6 +93,20 @@ class _MainLayoutState extends State<MainLayout> {
   OverlayEntry? _overlayEntry;
 
   @override
+  void didUpdateWidget(MainLayout oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.specialVideoSource == widget.specialVideoSource) {
+      return;
+    }
+    _searchSuggestions = [];
+    _removeOverlay();
+    final query = widget.searchQuery ?? '';
+    if (query.trim().isNotEmpty) {
+      _fetchSearchSuggestions(query);
+    }
+  }
+
+  @override
   void dispose() {
     _debounceTimer?.cancel();
     _removeOverlay();
@@ -117,12 +136,25 @@ class _MainLayoutState extends State<MainLayout> {
     final currentQuery = query;
     final isLocalMode = await UserDataService.getIsLocalMode();
     final isLocalSearch = await UserDataService.getLocalSearch();
+    final special = widget.specialVideoSource;
 
     List<String> suggestionResults;
-    if (isLocalMode || isLocalSearch) {
-      suggestionResults = await SearchService.searchRecommand(query.trim());
-    } else {
-      suggestionResults = await ApiService.getSearchSuggestions(query.trim());
+    try {
+      if (special) {
+        suggestionResults = await ApiService.getSearchSuggestions(
+          query.trim(),
+          special: true,
+        );
+      } else if (isLocalMode || isLocalSearch) {
+        suggestionResults = await SearchService.searchRecommand(query.trim());
+      } else {
+        suggestionResults = await ApiService.getSearchSuggestions(query.trim());
+      }
+    } on SpecialSourceForbiddenException {
+      if (mounted) {
+        widget.onSpecialSourceForbidden?.call();
+      }
+      return;
     }
 
     // 检查搜索框内容是否已变化

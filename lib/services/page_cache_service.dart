@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/douban_movie.dart';
 import '../models/play_record.dart';
 import '../models/favorite_item.dart';
+import '../search/search_history_plan.dart';
+import '../search/special_search_history_store.dart';
 import 'api_service.dart';
 import 'douban_service.dart';
 import 'data_operation_interface.dart';
@@ -463,7 +465,10 @@ class PageCacheService
 
   @override
   Future<DataOperationResult<List<String>>> getSearchHistory(
-      BuildContext context) async {
+      BuildContext context, {bool special = false}) async {
+    if (special) {
+      return DataOperationResult.success(await SpecialSearchHistoryStore.read());
+    }
     final isLocalMode = UserDataService.getIsLocalModeSync();
     if (isLocalMode) {
       return DataOperationResult.success(await LocalModeStorageService.getSearchHistory());
@@ -484,7 +489,10 @@ class PageCacheService
 
   /// 直接走接口并保存到缓存
   Future<DataOperationResult<List<String>>> getSearchHistoryDirect(
-      BuildContext context) async {
+      BuildContext context, {bool special = false}) async {
+    if (special) {
+      return DataOperationResult.success(await SpecialSearchHistoryStore.read());
+    }
     final isLocalMode = UserDataService.getIsLocalModeSync();
     if (isLocalMode) {
       return DataOperationResult.success(await LocalModeStorageService.getSearchHistory());
@@ -508,7 +516,10 @@ class PageCacheService
   }
 
   @override
-  Future<void> refreshSearchHistory(BuildContext context) async {
+  Future<void> refreshSearchHistory(BuildContext context, {bool special = false}) async {
+    if (special) {
+      return;
+    }
     final isLocalMode = UserDataService.getIsLocalModeSync();
     if (isLocalMode) {
       return;
@@ -530,7 +541,19 @@ class PageCacheService
 
   @override
   Future<DataOperationResult<void>> addSearchHistory(
-      String query, BuildContext context) async {
+      String query, BuildContext context, {bool special = false}) async {
+    if (special) {
+      final plan = SearchHistoryPlan.forMode(keyword: query, special: true);
+      // The marked post does not write normal history. Start it before the
+      // local await so the BuildContext is not used across an async gap.
+      final serverPost = !UserDataService.getIsLocalModeSync() &&
+              !plan.mutatesServerHistory
+          ? ApiService.addSearchHistory(query, context, special: true)
+          : null;
+      await SpecialSearchHistoryStore.add(query);
+      await serverPost;
+      return DataOperationResult.success(null);
+    }
     final isLocalMode = UserDataService.getIsLocalModeSync();
     if (isLocalMode) {
       await LocalModeStorageService.addSearchHistory(query);
@@ -577,7 +600,11 @@ class PageCacheService
 
   @override
   Future<DataOperationResult<void>> deleteSearchHistory(
-      String query, BuildContext context) async {
+      String query, BuildContext context, {bool special = false}) async {
+    if (special) {
+      await SpecialSearchHistoryStore.remove(query);
+      return DataOperationResult.success(null);
+    }
     final isLocalMode = UserDataService.getIsLocalModeSync();
     if (isLocalMode) {
       await LocalModeStorageService.deleteSearchHistory(query);
@@ -608,7 +635,11 @@ class PageCacheService
 
   @override
   Future<DataOperationResult<void>> clearSearchHistory(
-      BuildContext context) async {
+      BuildContext context, {bool special = false}) async {
+    if (special) {
+      await SpecialSearchHistoryStore.clear();
+      return DataOperationResult.success(null);
+    }
     final isLocalMode = UserDataService.getIsLocalModeSync();
     if (isLocalMode) {
       await LocalModeStorageService.clearSearchHistory();

@@ -5,6 +5,7 @@ class UserDataService {
   static const String _usernameKey = 'username';
   static const String _passwordKey = 'password';
   static const String _cookiesKey = 'cookies';
+  static const String _authTokenKey = 'auth_token';
   static const String _doubanDataSourceKey = 'douban_data_source';
   static const String _doubanImageSourceKey = 'douban_image_source';
   static const String _m3u8ProxyUrlKey = 'm3u8_proxy_url';
@@ -15,19 +16,57 @@ class UserDataService {
   
   // 内存缓存
   static bool? _isLocalModeCache;
+  static int sessionRevision = 0;
+  static final List<void Function()> _sessionListeners = [];
 
-  // 保存用户登录信息
+  static void addSessionListener(void Function() listener) {
+    _sessionListeners.add(listener);
+  }
+
+  static void removeSessionListener(void Function() listener) {
+    _sessionListeners.remove(listener);
+  }
+
+  static void _bumpSession() {
+    sessionRevision++;
+    for (final listener in List<void Function()>.from(_sessionListeners)) {
+      listener();
+    }
+  }
+
+  // 保存用户登录信息。
+  // [authToken] 是登录响应里的 token 字段，已经是 URL 编码 JSON，按原样保存。
+  // 传入空字符串表示这次登录没有 token，清掉上一台服务器留下的令牌。
   static Future<void> saveUserData({
     required String serverUrl,
     required String username,
     required String password,
     required String cookies,
+    String? authToken,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_serverUrlKey, serverUrl);
     await prefs.setString(_usernameKey, username);
     await prefs.setString(_passwordKey, password);
     await prefs.setString(_cookiesKey, cookies);
+    if (authToken != null) {
+      if (authToken.isEmpty) {
+        await prefs.remove(_authTokenKey);
+      } else {
+        await prefs.setString(_authTokenKey, authToken);
+      }
+    }
+    _bumpSession();
+  }
+
+  /// 登录响应里的 Bearer token。不要解码。
+  static Future<String?> getAuthToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString(_authTokenKey);
+    if (token == null || token.isEmpty) {
+      return null;
+    }
+    return token;
   }
 
   // 获取服务器地址
@@ -67,6 +106,8 @@ class UserDataService {
     await prefs.remove(_usernameKey);
     await prefs.remove(_passwordKey);
     await prefs.remove(_cookiesKey);
+    await prefs.remove(_authTokenKey);
+    _bumpSession();
   }
 
   // 只清除密码和cookies，保留服务器地址和用户名
@@ -74,12 +115,16 @@ class UserDataService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_passwordKey);
     await prefs.remove(_cookiesKey);
+    await prefs.remove(_authTokenKey);
+    _bumpSession();
   }
 
   // 只清除过期 cookies，保留服务器地址、用户名和密码以便刷新
   static Future<void> clearCookies() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_cookiesKey);
+    await prefs.remove(_authTokenKey);
+    _bumpSession();
   }
 
   // 保存「保持登录」设置
