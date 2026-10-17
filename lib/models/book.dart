@@ -64,7 +64,11 @@ class BookItem {
     final acquisition = _firstAcquisition(json);
     final rawHref = firstNonEmptyString([
       json['detailHref'],
+      json['detail_href'],
+      json['bookHref'],
+      json['book_href'],
       json['bookUrl'],
+      json['book_url'],
       json['href'],
       acquisition.href,
     ]);
