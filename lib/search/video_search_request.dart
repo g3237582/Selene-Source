@@ -59,8 +59,9 @@ class VideoSearchRequest {
     return VideoSearchRequest(uri: uri, headers: built);
   }
 
-  /// Prefer the login response `token`. Fall back to the `auth` cookie value
-  /// without decoding it; both are the same URL-encoded JSON.
+  /// Prefer the login response `token`. Fall back to `auth_luna` or `auth`
+  /// without decoding either value. The body token is already percent-encoded
+  /// JSON and must be sent as `Authorization: Bearer` verbatim.
   static String? bearerToken({String? storedToken, String? cookie}) {
     if (storedToken != null && storedToken.isNotEmpty) {
       return storedToken;
@@ -68,18 +69,30 @@ class VideoSearchRequest {
     return tokenFromAuthCookie(cookie);
   }
 
+  /// Cookie value as it appeared in `Set-Cookie` / the stored cookie string.
+  /// `auth_luna` wins over legacy `auth`. Do not `Uri.decode` the value:
+  /// decoding the body token breaks search, and this fallback stays consistent.
   static String? tokenFromAuthCookie(String? cookies) {
     if (cookies == null || cookies.isEmpty) {
       return null;
     }
+    String? legacy;
     for (final part in cookies.split(';')) {
       final trimmed = part.trim();
-      const prefix = 'auth=';
-      if (trimmed.startsWith(prefix) && trimmed.length > prefix.length) {
-        return trimmed.substring(prefix.length);
+      final separator = trimmed.indexOf('=');
+      if (separator <= 0 || separator >= trimmed.length - 1) {
+        continue;
+      }
+      final name = trimmed.substring(0, separator);
+      final value = trimmed.substring(separator + 1);
+      if (name == 'auth_luna') {
+        return value;
+      }
+      if (name == 'auth') {
+        legacy ??= value;
       }
     }
-    return null;
+    return legacy;
   }
 
   /// Returns the `token` field exactly as the login JSON provided it.

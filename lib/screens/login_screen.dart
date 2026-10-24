@@ -1,9 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io' show Platform;
 import 'dart:async';
-import '../search/video_search_request.dart';
+import '../services/login_response.dart';
 import '../services/user_data_service.dart';
 import '../services/local_mode_storage_service.dart';
 import '../services/subscription_service.dart';
@@ -261,21 +262,14 @@ class _LoginScreenState extends State<LoginScreen> {
     return processedUrl;
   }
 
-  String _parseCookies(http.Response response) {
-    // 解析 Set-Cookie 头部
-    List<String> cookies = [];
-
-    // 获取所有 Set-Cookie 头部
-    final setCookieHeaders = response.headers['set-cookie'];
-    if (setCookieHeaders != null) {
-      // HTTP 头部通常是 String 类型
-      final cookieParts = setCookieHeaders.split(';');
-      if (cookieParts.isNotEmpty) {
-        cookies.add(cookieParts[0].trim());
-      }
-    }
-
-    return cookies.join('; ');
+  void _logLoginFailure(Object error, StackTrace stack) {
+    final password = _passwordController.text;
+    final raw = error.toString();
+    final redacted = password.isEmpty ? raw : raw.replaceAll(password, '***');
+    final brief =
+        redacted.length <= 180 ? redacted : '${redacted.substring(0, 180)}…';
+    debugPrint('登录失败: $brief');
+    debugPrint('$stack');
   }
 
   void _showToast(String message, Color backgroundColor) {
@@ -329,59 +323,44 @@ class _LoginScreenState extends State<LoginScreen> {
           _isLoading = false;
         });
 
-        // 根据状态码显示不同的消息
-        switch (response.statusCode) {
-          case 200:
-            // 解析并保存 cookies
-            String cookies = _parseCookies(response);
-            String? authToken;
-            try {
-              authToken = VideoSearchRequest.readLoginToken(
-                json.decode(response.body),
-              );
-            } catch (_) {
-              authToken = null;
-            }
-
-            // 保存用户数据。token 按登录响应原样保存，不解码。
-            await UserDataService.saveUserData(
-              serverUrl: baseUrl,
-              username: _usernameController.text,
-              password: _passwordController.text,
-              cookies: cookies,
-              authToken: authToken ?? '',
-            );
-            if (!mounted) return;
-
-            // 保存模式状态为服务器模式
-            await UserDataService.saveIsLocalMode(false);
-            if (!mounted) return;
-
-            // _showToast('登录成功！', const Color(0xFF27ae60));
-
-            // 跳转到首页，并清除所有路由栈（强制销毁所有旧页面）
-            if (mounted) {
-              Navigator.of(context).pushAndRemoveUntil(
-                MaterialPageRoute(builder: (context) => const HomeScreen()),
-                (route) => false,
-              );
-            }
-            break;
-          case 401:
-            _showToast('用户名或密码错误', const Color(0xFFe74c3c));
-            break;
-          case 500:
-            _showToast('服务器错误', const Color(0xFFe74c3c));
-            break;
-          default:
-            _showToast('网络异常', const Color(0xFFe74c3c));
+        // 正文和 Set-Cookie 分开读。cookie 解析失败不能挡住 ok + token。
+        final result = LoginResponse.interpret(
+          statusCode: response.statusCode,
+          readBody: () => response.body,
+          readSetCookie: () => response.headers['set-cookie'],
+        );
+        if (!result.enterHome) {
+          _showToast(result.message ?? '网络异常', const Color(0xFFe74c3c));
+          return;
         }
-      } catch (e) {
+
+        // token 按登录响应原样保存，不解码。
+        await UserDataService.saveUserData(
+          serverUrl: baseUrl,
+          username: _usernameController.text,
+          password: _passwordController.text,
+          cookies: result.cookies,
+          authToken: result.token,
+        );
+        if (!mounted) return;
+
+        // 保存模式状态为服务器模式
+        await UserDataService.saveIsLocalMode(false);
+        if (!mounted) return;
+
+        // 跳转到首页，并清除所有路由栈（强制销毁所有旧页面）
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => const HomeScreen()),
+          (route) => false,
+        );
+      } catch (error, stack) {
         if (!mounted) return;
         setState(() {
           _isLoading = false;
         });
-        _showToast('网络异常', const Color(0xFFe74c3c));
+        _logLoginFailure(error, stack);
+        final hint = kDebugMode ? ' (${error.runtimeType})' : '';
+        _showToast('网络异常$hint', const Color(0xFFe74c3c));
       }
     }
   }
