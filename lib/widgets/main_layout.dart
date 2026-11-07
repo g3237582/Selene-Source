@@ -35,6 +35,10 @@ class MainLayout extends StatefulWidget {
   final bool specialVideoSource;
   final VoidCallback? onSpecialSourceForbidden;
 
+  /// 测试或调用方注入的建议加载器。为空时仍按普通源 / 特殊源 / 本地搜索选择原有接口。
+  final Future<List<String>> Function(String query, {required bool special})?
+      suggestionLoader;
+
   const MainLayout({
     super.key,
     required this.content,
@@ -55,6 +59,7 @@ class MainLayout extends StatefulWidget {
     this.bottomNavItems,
     this.specialVideoSource = false,
     this.onSpecialSourceForbidden,
+    this.suggestionLoader,
   });
 
   @override
@@ -92,6 +97,10 @@ class _MainLayoutState extends State<MainLayout> {
   final LayerLink _layerLink = LayerLink();
   OverlayEntry? _overlayEntry;
 
+  /// 点在搜索框和推荐列表之外时作废进行中的建议请求，避免关掉后又被异步结果打开。
+  int _suggestionGeneration = 0;
+  bool _suggestionsDismissed = false;
+
   @override
   void didUpdateWidget(MainLayout oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -100,6 +109,8 @@ class _MainLayoutState extends State<MainLayout> {
     }
     _searchSuggestions = [];
     _removeOverlay();
+    _suggestionGeneration++;
+    _suggestionsDismissed = false;
     final query = widget.searchQuery ?? '';
     if (query.trim().isNotEmpty) {
       _fetchSearchSuggestions(query);
@@ -118,7 +129,27 @@ class _MainLayoutState extends State<MainLayout> {
     _overlayEntry = null;
   }
 
+  /// 关掉推荐下拉，并忽略已经发出、尚未返回的建议。
+  void _suppressSuggestions() {
+    _suggestionsDismissed = true;
+    _suggestionGeneration++;
+    _debounceTimer?.cancel();
+    _searchSuggestions = [];
+    _removeOverlay();
+  }
+
+  /// 手机触摸不会让输入框失焦，所以不能只靠失焦来收起推荐。
+  /// 搜索框和推荐列表在同一个 [TextFieldTapRegion] 组里，点它们不会走到这里。
+  void _onSearchTapOutside(PointerDownEvent event) {
+    _suppressSuggestions();
+    widget.searchFocusNode?.unfocus();
+  }
+
   void _fetchSearchSuggestions(String query) async {
+    if (_suggestionsDismissed) {
+      return;
+    }
+    final generation = _suggestionGeneration;
     if (query.trim().isEmpty) {
       if (mounted) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -134,21 +165,28 @@ class _MainLayoutState extends State<MainLayout> {
     }
 
     final currentQuery = query;
-    final isLocalMode = await UserDataService.getIsLocalMode();
-    final isLocalSearch = await UserDataService.getLocalSearch();
     final special = widget.specialVideoSource;
 
     List<String> suggestionResults;
     try {
-      if (special) {
-        suggestionResults = await ApiService.getSearchSuggestions(
-          query.trim(),
-          special: true,
-        );
-      } else if (isLocalMode || isLocalSearch) {
-        suggestionResults = await SearchService.searchRecommand(query.trim());
+      final loader = widget.suggestionLoader;
+      if (loader != null) {
+        suggestionResults = await loader(query.trim(), special: special);
       } else {
-        suggestionResults = await ApiService.getSearchSuggestions(query.trim());
+        final isLocalMode = await UserDataService.getIsLocalMode();
+        final isLocalSearch = await UserDataService.getLocalSearch();
+        if (special) {
+          suggestionResults = await ApiService.getSearchSuggestions(
+            query.trim(),
+            special: true,
+          );
+        } else if (isLocalMode || isLocalSearch) {
+          suggestionResults =
+              await SearchService.searchRecommand(query.trim());
+        } else {
+          suggestionResults =
+              await ApiService.getSearchSuggestions(query.trim());
+        }
       }
     } on SpecialSourceForbiddenException {
       if (mounted) {
@@ -157,8 +195,10 @@ class _MainLayoutState extends State<MainLayout> {
       return;
     }
 
-    // 检查搜索框内容是否已变化
+    // 检查搜索框内容是否已变化，或用户已经点到外面关掉了推荐。
     if (!mounted ||
+        _suggestionsDismissed ||
+        generation != _suggestionGeneration ||
         widget.searchQuery != currentQuery ||
         suggestionResults.isEmpty) {
       return;
@@ -166,7 +206,10 @@ class _MainLayoutState extends State<MainLayout> {
 
     // 使用 post-frame callback 确保在正确的时机更新状态
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || widget.searchQuery != currentQuery) {
+      if (!mounted ||
+          _suggestionsDismissed ||
+          generation != _suggestionGeneration ||
+          widget.searchQuery != currentQuery) {
         return;
       }
 
@@ -176,7 +219,10 @@ class _MainLayoutState extends State<MainLayout> {
         });
         // 再次使用 post-frame callback 显示 overlay
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && _searchSuggestions.isNotEmpty) {
+          if (mounted &&
+              !_suggestionsDismissed &&
+              generation == _suggestionGeneration &&
+              _searchSuggestions.isNotEmpty) {
             _showSuggestionsOverlay();
           }
         });
@@ -190,6 +236,7 @@ class _MainLayoutState extends State<MainLayout> {
   }
 
   void _onSearchQueryChanged(String query) {
+    _suggestionsDismissed = false;
     // 使用 post-frame callback 来调用父组件回调，避免在 build 期间触发 setState
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -244,7 +291,9 @@ class _MainLayoutState extends State<MainLayout> {
           link: _layerLink,
           showWhenUnlinked: false,
           offset: const Offset(0, 42), // 紧贴搜索框
-          child: Material(
+          child: TextFieldTapRegion(
+            child: Material(
+            key: const ValueKey<String>('search-suggestions'),
             elevation: 8,
             borderRadius: BorderRadius.circular(12),
             color: themeService.isDarkMode
@@ -261,8 +310,8 @@ class _MainLayoutState extends State<MainLayout> {
                   return InkWell(
                     onTap: () {
                       widget.searchController?.text = suggestion;
+                      _suppressSuggestions();
                       widget.onSearchSubmitted?.call(suggestion);
-                      _removeOverlay();
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -301,6 +350,7 @@ class _MainLayoutState extends State<MainLayout> {
               ),
             ),
           ),
+        ),
         ),
       ),
     );
@@ -544,13 +594,20 @@ class _MainLayoutState extends State<MainLayout> {
         child: Focus(
           onFocusChange: (hasFocus) {
             if (!hasFocus) {
-              // 失焦时关闭建议框
-              _removeOverlay();
+              _suppressSuggestions();
+              return;
+            }
+            // 再次点进输入框时重新打开推荐。只靠 onTap 会漏掉「从失焦到聚焦」的第一次点击。
+            _suggestionsDismissed = false;
+            final query = widget.searchController?.text ?? widget.searchQuery ?? '';
+            if (query.trim().isNotEmpty) {
+              _fetchSearchSuggestions(query);
             }
           },
           child: TextField(
             controller: widget.searchController,
             focusNode: widget.searchFocusNode,
+            onTapOutside: _onSearchTapOutside,
             autofocus: false,
             textInputAction: TextInputAction.search,
             keyboardType: TextInputType.text,
@@ -597,7 +654,7 @@ class _MainLayoutState extends State<MainLayout> {
                           onTap:
                               (widget.searchQuery?.trim().isNotEmpty ?? false)
                                   ? () {
-                                      _removeOverlay();
+                                      _suppressSuggestions();
                                       widget.onSearchSubmitted
                                           ?.call(widget.searchQuery!);
                                     }
@@ -658,7 +715,7 @@ class _MainLayoutState extends State<MainLayout> {
                               : null,
                           child: GestureDetector(
                             onTap: () {
-                              _removeOverlay();
+                              _suppressSuggestions();
                               widget.onClearSearch?.call();
                             },
                             behavior: HitTestBehavior.opaque,
@@ -703,12 +760,12 @@ class _MainLayoutState extends State<MainLayout> {
               height: 1.2,
             ),
             onSubmitted: (value) {
-              _removeOverlay();
+              _suppressSuggestions();
               widget.onSearchSubmitted?.call(value);
             },
             onChanged: _onSearchQueryChanged,
             onTap: () {
-              // 聚焦时如果有内容，显示建议
+              _suggestionsDismissed = false;
               if (widget.searchQuery?.trim().isNotEmpty ?? false) {
                 _fetchSearchSuggestions(widget.searchQuery!);
               }
