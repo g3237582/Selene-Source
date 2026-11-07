@@ -15,6 +15,7 @@ import '../models/epg_program.dart';
 import '../models/search_suggestion.dart';
 import '../search/search_history_plan.dart';
 import '../search/special_source_access.dart';
+import '../search/search_hit_playback.dart';
 import '../search/video_search_request.dart';
 
 /// API响应结果类
@@ -692,17 +693,31 @@ class ApiService {
     }
   }
 
-  /// 获取视频详情
+  /// 获取视频详情。
+  ///
+  /// [special] 为 true 时带 `special=1`。特殊源不在普通源列表里，不带这个参数时
+  /// 服务端会返回「无效的API来源」，播放页就会显示「未找到匹配结果」。
   static Future<List<SearchResult>> fetchSourceDetail(
-      String source, String id) async {
+    String source,
+    String id, {
+    bool special = false,
+    String? title,
+  }) async {
     try {
       final response = await get<SearchResult>(
         '/api/detail',
-        queryParameters: {
-          'source': source,
-          'id': id,
+        queryParameters: SearchHitPlayback.detailQuery(
+          source: source,
+          id: id,
+          title: title,
+          special: special,
+        ),
+        fromJson: (data) {
+          if (data is! Map) {
+            throw const FormatException('detail body is not an object');
+          }
+          return SearchResult.fromJson(Map<String, dynamic>.from(data));
         },
-        fromJson: (data) => SearchResult.fromJson(data as Map<String, dynamic>),
       );
 
       if (response.success && response.data != null) {
@@ -756,12 +771,8 @@ class ApiService {
 
       if (response.success && response.data != null) {
         final data = response.data!;
-        final results = data['results'] as List<dynamic>? ?? [];
-
-        // 直接返回所有搜索结果，不进行过滤
-        return results
-            .map((item) => SearchResult.fromJson(item as Map<String, dynamic>))
-            .toList();
+        // 直接返回所有搜索结果，不进行过滤。单条解析失败不能把整页结果丢掉。
+        return SearchResult.parseList(data['results']);
       } else {
         print('搜索失败: ${response.message}');
         return [];

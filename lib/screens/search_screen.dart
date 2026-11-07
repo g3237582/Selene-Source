@@ -14,6 +14,7 @@ import '../services/user_data_service.dart';
 import '../widgets/video_source_mode_switch.dart';
 import '../models/search_result.dart';
 import '../models/video_info.dart';
+import '../search/search_hit_playback.dart';
 import '../search/search_list_paging.dart';
 import '../search/search_result_aggregator.dart';
 import '../search/poster_hash_loader.dart';
@@ -1370,19 +1371,11 @@ class _SearchScreenState extends State<SearchScreen>
                           onVideoTap: _onVideoTap,
                           onGlobalMenuAction: _onGlobalMenuAction,
                           onSourceSelected: (SearchResult result) {
-                            Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (context) => PlayerScreen(
-                                          source: result.source,
-                                          id: result.id,
-                                          year: result.year,
-                                          title: result.title,
-                                          stitle: _searchQuery,
-                                          stype: result.episodes.length > 1
-                                              ? 'tv'
-                                              : 'movie',
-                                        )));
+                            _openSearchHit(SearchHitPlayback.single(
+                              result: result,
+                              query: _searchQuery,
+                              special: _sourceMode.special,
+                            ));
                           },
                           hasReceivedStart: _hasReceivedStart,
                         )
@@ -1412,6 +1405,24 @@ class _SearchScreenState extends State<SearchScreen>
 
   void _onVideoTap(VideoInfo videoInfo) {
     _onGlobalMenuAction(videoInfo, VideoMenuAction.play);
+  }
+
+  void _openSearchHit(SearchHitPlayback hit) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PlayerScreen(
+          source: hit.source,
+          id: hit.id,
+          year: hit.year,
+          title: hit.title,
+          stitle: hit.stitle,
+          stype: hit.stype,
+          prefer: hit.prefer ? 'true' : null,
+          special: hit.special,
+        ),
+      ),
+    );
   }
 
   String _getResultsSummaryText() {
@@ -1502,33 +1513,37 @@ class _SearchScreenState extends State<SearchScreen>
     switch (action) {
       case VideoMenuAction.play:
         if (_useAggregatedView) {
-          // 聚合卡片，只传递title和stitle，并从id中解析stype
-          final parts = videoInfo.id.split('_');
-          final type = parts.length > 2 ? parts.last : null;
-          final year = parts.length > 1 ? parts[1] : null;
-
-          Navigator.push(
-              context,
-              MaterialPageRoute(
-                  builder: (context) => PlayerScreen(
-                        title: videoInfo.title,
-                        stitle: stitle,
-                        stype: type,
-                        year: year,
-                      )));
+          // 聚合 key 是「标题_年份_类型」。标题里再有下划线时不能从 key 拆年份。
+          // 必须带上真实 source/id，播放页才会对这一条调 /api/detail。
+          final hit = SearchHitPlayback.fromAggregatedList(
+                results: _pagedSearchResults,
+                posterHashes: _posterHashes,
+                cardKey: videoInfo.id,
+                query: stitle,
+                special: _sourceMode.special,
+              ) ??
+              SearchHitPlayback(
+                source: null,
+                id: null,
+                title: videoInfo.title,
+                year: videoInfo.year.trim().isEmpty ? null : videoInfo.year,
+                stype: videoInfo.totalEpisodes == 1 ? 'movie' : 'tv',
+                stitle: stitle,
+                prefer: true,
+                special: _sourceMode.special,
+              );
+          _openSearchHit(hit);
         } else {
-          // 非聚合卡片，传递完整信息
-          Navigator.push(
-              context,
-              MaterialPageRoute(
-                  builder: (context) => PlayerScreen(
-                        source: videoInfo.source,
-                        id: videoInfo.id,
-                        year: videoInfo.year,
-                        title: videoInfo.title,
-                        stype: videoInfo.totalEpisodes > 1 ? 'tv' : 'movie',
-                        stitle: stitle,
-                      )));
+          _openSearchHit(SearchHitPlayback(
+            source: videoInfo.source,
+            id: videoInfo.id,
+            title: videoInfo.title,
+            year: videoInfo.year.trim().isEmpty ? null : videoInfo.year,
+            stype: videoInfo.totalEpisodes > 1 ? 'tv' : 'movie',
+            stitle: stitle,
+            prefer: false,
+            special: _sourceMode.special,
+          ));
         }
         break;
       case VideoMenuAction.favorite:

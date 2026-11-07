@@ -30,26 +30,108 @@ class SearchResult {
     this.doubanId,
   });
 
-  /// 从JSON创建SearchResult
+  /// 从JSON创建SearchResult。
+  ///
+  /// 采集站的 id / 年份 / 豆瓣 id 有时是数字，有时是字符串。类型不一致时如果直接
+  /// 赋值，整页搜索结果会解析失败，播放页就会显示「未找到匹配结果」。
   factory SearchResult.fromJson(Map<String, dynamic> json) {
     return SearchResult(
-      id: json['id'] ?? '',
-      title: json['title'] ?? '',
-      poster: json['poster'] ?? '',
-      episodes: json['episodes'] != null 
-          ? List<String>.from(json['episodes'])
-          : [],
-      episodesTitles: json['episodes_titles'] != null 
-          ? List<String>.from(json['episodes_titles'])
-          : [],
-      source: json['source'] ?? '',
-      sourceName: json['source_name'] ?? '',
-      class_: json['class'],
-      year: json['year'] ?? '',
-      desc: json['desc'],
-      typeName: json['type_name'],
-      doubanId: json['douban_id'],
+      id: _asString(json['id']),
+      title: _asString(json['title']),
+      poster: _asString(json['poster']),
+      episodes: _asStringList(json['episodes']),
+      episodesTitles: _asStringList(json['episodes_titles']),
+      source: _asString(json['source']),
+      sourceName: _asString(json['source_name']),
+      class_: _asOptionalString(json['class']),
+      year: _asString(json['year']),
+      desc: _asOptionalString(json['desc']),
+      typeName: _asOptionalString(json['type_name']),
+      doubanId: _asInt(json['douban_id']),
     );
+  }
+
+  static String _asString(dynamic value) {
+    if (value == null) {
+      return '';
+    }
+    if (value is int) {
+      return value.toString();
+    }
+    if (value is num && value == value.roundToDouble()) {
+      return value.toInt().toString();
+    }
+    return value.toString();
+  }
+
+  static String? _asOptionalString(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+    return _asString(value);
+  }
+
+  static int? _asInt(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    if (value is String) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) {
+        return null;
+      }
+      return int.tryParse(trimmed);
+    }
+    return null;
+  }
+
+  static List<String> _asStringList(dynamic value) {
+    if (value is! List) {
+      return const [];
+    }
+    final items = <String>[];
+    for (final item in value) {
+      if (item == null) {
+        continue;
+      }
+      if (item is Map) {
+        final playUrl = item['playUrl'] ?? item['url'];
+        if (playUrl != null && playUrl.toString().isNotEmpty) {
+          items.add(playUrl.toString());
+        }
+        continue;
+      }
+      final text = _asString(item);
+      if (text.isNotEmpty) {
+        items.add(text);
+      }
+    }
+    return items;
+  }
+
+  /// 跳过无法解析的单条记录，避免一条脏数据让整次详情查询变成空列表。
+  static List<SearchResult> parseList(dynamic value) {
+    if (value is! List) {
+      return const [];
+    }
+    final parsed = <SearchResult>[];
+    for (final item in value) {
+      if (item is! Map) {
+        continue;
+      }
+      try {
+        parsed.add(SearchResult.fromJson(Map<String, dynamic>.from(item)));
+      } catch (_) {
+        continue;
+      }
+    }
+    return parsed;
   }
 
   /// 转换为JSON

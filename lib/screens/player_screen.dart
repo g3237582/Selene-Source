@@ -11,6 +11,7 @@ import '../services/douban_service.dart';
 import '../services/user_data_service.dart';
 import '../services/search_service.dart';
 import '../models/search_result.dart';
+import '../search/search_hit_playback.dart';
 import '../models/douban_movie.dart';
 import '../models/play_record.dart';
 import '../services/page_cache_service.dart';
@@ -31,6 +32,7 @@ class PlayerScreen extends StatefulWidget {
   final String? stitle;
   final String? stype;
   final String? prefer;
+  final bool special;
 
   const PlayerScreen({
     super.key,
@@ -41,6 +43,7 @@ class PlayerScreen extends StatefulWidget {
     this.stitle,
     this.stype,
     this.prefer,
+    this.special = false,
   });
 
   @override
@@ -225,34 +228,46 @@ class _PlayerScreenState extends State<PlayerScreen>
     // 初始化参数
     initParam();
 
-    // 执行查询
-    allSources = await fetchSourcesData(
+    // 执行查询。搜索命中的 source/id 不在重搜结果里时，再按该源拉详情。
+    final searched = await fetchSourcesData(
         (searchTitle.isNotEmpty) ? searchTitle : videoTitle);
     if (!_isActiveLoad(loadGeneration)) return;
 
-    if (currentSource.isNotEmpty &&
+    var selection = PlaybackSourceSelection.resolve(
+      searched: searched,
+      detail: const [],
+      title: videoTitle,
+      year: widget.year,
+      stype: widget.stype,
+      source: currentSource,
+      id: currentID,
+      needPrefer: needPrefer,
+    );
+    final detailMissing = currentSource.isNotEmpty &&
         currentID.isNotEmpty &&
-        !allSources.any((source) =>
-            source.source == currentSource && source.id == currentID)) {
-      allSources = await fetchSourceDetail(currentSource, currentID);
+        !selection.sources.any((source) =>
+            PlaybackSourceSelection.sameIdentity(
+                source, currentSource, currentID));
+    if (detailMissing) {
+      final detail = await fetchSourceDetail(currentSource, currentID);
       if (!_isActiveLoad(loadGeneration)) return;
+      selection = PlaybackSourceSelection.resolve(
+        searched: searched,
+        detail: detail,
+        title: videoTitle,
+        year: widget.year,
+        stype: widget.stype,
+        source: currentSource,
+        id: currentID,
+        needPrefer: needPrefer,
+      );
     }
-    if (allSources.isEmpty) {
+    if (!selection.found || selection.current == null) {
       showError('未找到匹配结果');
       return;
     }
-
-    // 指定源和id且无需优选
-    currentDetail = allSources.first;
-    if (currentSource.isNotEmpty && currentID.isNotEmpty && !needPrefer) {
-      final target = allSources.where(
-          (source) => source.source == currentSource && source.id == currentID);
-      currentDetail = target.isNotEmpty ? target.first : null;
-    }
-    if (currentDetail == null) {
-      showError('未找到匹配结果');
-      return;
-    }
+    allSources = selection.sources;
+    currentDetail = selection.current;
 
     // 未指定源和 id/需要优选，且优选测速开关打开时，执行优选
     if ((currentSource.isEmpty || currentID.isEmpty || needPrefer) &&
@@ -2515,54 +2530,30 @@ class _PlayerScreenState extends State<PlayerScreen>
     );
   }
 
-  /// 获取视频详情
+  /// 获取视频详情。特殊源必须走服务端，本地普通源列表里没有这些 key。
   Future<List<SearchResult>> fetchSourceDetail(String source, String id) async {
-    // 检查是否启用本地搜索
     final isLocalSearch = await UserDataService.getLocalSearch();
-    if (isLocalSearch) {
+    if (isLocalSearch && !widget.special) {
       return await SearchService.getDetailSync(source, id);
-    } else {
-      return await ApiService.fetchSourceDetail(source, id);
     }
+    return await ApiService.fetchSourceDetail(
+      source,
+      id,
+      special: widget.special,
+      title: videoTitle,
+    );
   }
 
-  /// 搜索视频源数据（带过滤）
+  /// 搜索视频源数据。过滤在 [PlaybackSourceSelection] 里做。
+  /// 特殊源搜索不能改走本地普通源，否则刚点开的结果会全部对不上。
   Future<List<SearchResult>> fetchSourcesData(String query) async {
-    // 检查是否启用本地搜索
     final isLocalSearch = await UserDataService.getLocalSearch();
     final isLocalMode = await UserDataService.getIsLocalMode();
 
-    List<SearchResult> results;
-    if (isLocalSearch || isLocalMode) {
-      // 使用本地搜索
-      results = await SearchService.searchSync(query);
-    } else {
-      // 使用服务器搜索
-      results = await ApiService.fetchSourcesData(query);
+    if ((isLocalSearch || isLocalMode) && !widget.special) {
+      return await SearchService.searchSync(query);
     }
-
-    // 直接在这里展开过滤逻辑
-    return results.where((result) {
-      // 标题匹配检查
-      final titleMatch = result.title.replaceAll(' ', '').toLowerCase() ==
-          (widget.title.replaceAll(' ', '').toLowerCase());
-
-      // 年份匹配检查
-      final yearMatch = widget.year == null ||
-          result.year.toLowerCase() == widget.year!.toLowerCase();
-
-      // 类型匹配检查
-      bool typeMatch = true;
-      if (widget.stype != null) {
-        if (widget.stype == 'tv') {
-          typeMatch = result.episodes.length > 1;
-        } else if (widget.stype == 'movie') {
-          typeMatch = result.episodes.length == 1;
-        }
-      }
-
-      return titleMatch && yearMatch && typeMatch;
-    }).toList();
+    return await ApiService.fetchSourcesData(query, special: widget.special);
   }
 
   @override
