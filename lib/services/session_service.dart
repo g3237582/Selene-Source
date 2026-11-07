@@ -1,8 +1,9 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
-import '../search/video_search_request.dart';
+import 'login_response.dart';
 import 'session_policy.dart';
 import 'user_data_service.dart';
 
@@ -38,10 +39,12 @@ class SessionService {
 
   /// Re-login with the stored password and replace cookies on success.
   static Future<SessionRefreshOutcome> refreshSession() async {
+    var secret = '';
     try {
       final serverUrl = await UserDataService.getServerUrl();
       final username = await UserDataService.getUsername();
       final password = await UserDataService.getPassword();
+      secret = password ?? '';
       if (serverUrl == null ||
           serverUrl.isEmpty ||
           username == null ||
@@ -69,32 +72,33 @@ class SessionService {
           )
           .timeout(_timeout);
 
-      if (response.statusCode == 200) {
-        final cookies = parseSetCookieHeader(response.headers['set-cookie']);
-        String? authToken;
-        try {
-          authToken = VideoSearchRequest.readLoginToken(
-            json.decode(response.body),
-          );
-        } catch (_) {
-          authToken = null;
-        }
+      final result = LoginResponse.interpret(
+        statusCode: response.statusCode,
+        readBody: () => response.body,
+        readSetCookie: () => response.headers['set-cookie'],
+      );
+      if (result.enterHome) {
         await UserDataService.saveUserData(
           serverUrl: baseUrl,
           username: username,
           password: password,
-          cookies: cookies,
-          authToken: authToken ?? '',
+          cookies: result.cookies,
+          authToken: result.token,
         );
         return SessionRefreshOutcome.success;
       }
 
-      if (response.statusCode == 401) {
+      if (response.statusCode == 401 || response.statusCode == 200) {
         return SessionRefreshOutcome.rejected;
       }
 
       return SessionRefreshOutcome.serverError;
-    } catch (_) {
+    } catch (error, stack) {
+      final raw =
+          secret.isEmpty ? '$error' : '$error'.replaceAll(secret, '***');
+      final safe = raw.length <= 180 ? raw : '${raw.substring(0, 180)}…';
+      debugPrint('自动登录失败: $safe');
+      debugPrint('$stack');
       return SessionRefreshOutcome.networkError;
     }
   }
@@ -149,13 +153,6 @@ class SessionService {
 
   /// Same cookie parsing the login screen already uses.
   static String parseSetCookieHeader(String? setCookieHeaders) {
-    if (setCookieHeaders == null || setCookieHeaders.isEmpty) {
-      return '';
-    }
-    final cookieParts = setCookieHeaders.split(';');
-    if (cookieParts.isEmpty) {
-      return '';
-    }
-    return cookieParts[0].trim();
+    return LoginResponse.cookieHeaderToPairs(setCookieHeaders);
   }
 }

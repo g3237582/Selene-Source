@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class UserDataService {
@@ -30,7 +31,13 @@ class UserDataService {
   static void _bumpSession() {
     sessionRevision++;
     for (final listener in List<void Function()>.from(_sessionListeners)) {
-      listener();
+      try {
+        listener();
+      } catch (error, stack) {
+        // 监听器是 UI 刷新，不能把一次已经成功的登录写成网络失败。
+        debugPrint('会话监听器失败: $error');
+        debugPrint('$stack');
+      }
     }
   }
 
@@ -93,10 +100,14 @@ class UserDataService {
     return prefs.getString(_cookiesKey);
   }
 
-  // 检查是否已登录
+  // 检查是否已登录。Set-Cookie 读失败时仍然可能存下了正文里的 Bearer token。
   static Future<bool> isLoggedIn() async {
     final cookies = await getCookies();
-    return cookies != null && cookies.isNotEmpty;
+    if (cookies != null && cookies.isNotEmpty) {
+      return true;
+    }
+    final token = await getAuthToken();
+    return token != null && token.isNotEmpty;
   }
 
   // 清除用户数据
