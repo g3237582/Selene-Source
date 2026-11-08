@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 
 import '../models/music_track.dart';
+import '../playback/player_stream_cache.dart';
 import 'music_service.dart';
 
 class MusicPlayerService extends ChangeNotifier {
@@ -70,6 +71,7 @@ class MusicPlayerService extends ChangeNotifier {
       final headers = await MusicService.cookieHeaders();
       lyric = result.lyric;
       current = result.song;
+      await PlayerStreamCache.applyPlaybackProxy(player, url);
       await player.open(
         Media(url, httpHeaders: headers),
         play: true,
